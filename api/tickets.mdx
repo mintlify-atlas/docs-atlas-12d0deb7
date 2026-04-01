@@ -1,0 +1,672 @@
+---
+title: "Tickets"
+description: "Manage, transfer, and validate event tickets"
+---
+
+Tickets are issued to customers after a successful invoice payment. Each ticket carries a cryptographic token used for QR-based or NFC-based entry validation. Tickets can be transferred, sold, or gifted to other users and maintain a full audit trail via [Ticket Transactions](/api/ticket-transactions).
+
+## TicketStatus enum
+
+| Value | Description |
+|---|---|
+| `PENDING` | Awaiting payment |
+| `PAID` | Payment confirmed, ticket ready |
+| `ACTIVE` | Active and ready to use |
+| `USED` | Scanned and admitted at the event |
+| `FROZEN` | Locked pending a transfer or sale |
+| `TRANSFERRED` | Ownership transferred to another user |
+| `CANCELED` | Canceled by owner or PAYPAC |
+| `EXPIRED` | Past event date, no longer valid |
+| `ON_SALE` | Listed for peer-to-peer sale |
+
+---
+
+## GET /api/tickets/admin
+
+**Roles:** `PAYPAC`, `ORGANIZER`
+
+Paginated list of all tickets. `PAYPAC` sees every ticket across all events; `ORGANIZER` sees only tickets belonging to their own events.
+
+### Query parameters
+
+<ParamField query="event_id" type="number">
+  Filter tickets by event ID.
+</ParamField>
+
+<ParamField query="status" type="string">
+  Filter by ticket status. One of `PENDING`, `PAID`, `ACTIVE`, `USED`, `FROZEN`, `TRANSFERRED`, `CANCELED`, `EXPIRED`, `ON_SALE`.
+</ParamField>
+
+<ParamField query="search" type="string">
+  Free-text search across ticket reference, booking number, or customer name.
+</ParamField>
+
+<ParamField query="from" type="string">
+  ISO 8601 datetime. Return tickets created on or after this date.
+</ParamField>
+
+<ParamField query="to" type="string">
+  ISO 8601 datetime. Return tickets created on or before this date.
+</ParamField>
+
+<ParamField query="page" type="number" default="1">
+  Page number for pagination.
+</ParamField>
+
+<ParamField query="limit" type="number" default="50">
+  Results per page.
+</ParamField>
+
+### Response
+
+<ResponseField name="data" type="object[]">
+  Array of ticket objects.
+  <Expandable title="ticket fields">
+    <ResponseField name="id" type="number">Ticket ID.</ResponseField>
+    <ResponseField name="event_id" type="number">Associated event ID.</ResponseField>
+    <ResponseField name="customer_id" type="number">ID of the current ticket owner.</ResponseField>
+    <ResponseField name="reference_ticket" type="string">Unique alphanumeric reference.</ResponseField>
+    <ResponseField name="booking_ticket" type="string">Booking number (PYC-prefixed).</ResponseField>
+    <ResponseField name="status_ticket" type="string">Current ticket status.</ResponseField>
+    <ResponseField name="ev_name" type="string">Snapshot of the event name at purchase time.</ResponseField>
+    <ResponseField name="ev_date_event" type="string">Snapshot of the event date.</ResponseField>
+    <ResponseField name="loc_name_locality" type="string">Locality name.</ResponseField>
+    <ResponseField name="ticket_first_time" type="number">`1` = not yet used, `0` = already used.</ResponseField>
+    <ResponseField name="created_at" type="string">ISO 8601 creation timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="total" type="number">Total number of matching tickets.</ResponseField>
+<ResponseField name="page" type="number">Current page.</ResponseField>
+<ResponseField name="limit" type="number">Results per page.</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `401` | Missing or invalid authentication token |
+| `403` | Caller does not have `PAYPAC` or `ORGANIZER` role |
+| `500` | Internal server error |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url "https://api.paypac.com.co/api/tickets/admin?event_id=42&status=PAID&page=1&limit=25" \
+  --header "Authorization: Bearer <token>"
+```
+
+</CodeGroup>
+
+---
+
+## PATCH /api/tickets/admin/:id/status
+
+**Role:** `PAYPAC`
+
+Override the status of any ticket. Changing status to `CANCELED` is irreversible through this endpoint.
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Ticket ID.
+</ParamField>
+
+### Body
+
+<ParamField body="status" type="string" required>
+  New ticket status. One of `PENDING`, `PAID`, `ACTIVE`, `USED`, `FROZEN`, `TRANSFERRED`, `CANCELED`, `EXPIRED`, `ON_SALE`.
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">Confirmation message including the new status value.</ResponseField>
+<ResponseField name="ticket" type="object">
+  Updated ticket object.
+  <Expandable title="ticket fields">
+    <ResponseField name="id" type="number">Ticket ID.</ResponseField>
+    <ResponseField name="status_ticket" type="string">New status value.</ResponseField>
+    <ResponseField name="updated_at" type="string">Update timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Invalid status value |
+| `401` | Missing or invalid authentication token |
+| `403` | Caller does not have `PAYPAC` role |
+| `404` | Ticket not found |
+
+<CodeGroup>
+
+```bash cURL
+curl --request PATCH \
+  --url "https://api.paypac.com.co/api/tickets/admin/123/status" \
+  --header "Authorization: Bearer <token>" \
+  --header "Content-Type: application/json" \
+  --data '{"status": "CANCELED"}'
+```
+
+</CodeGroup>
+
+---
+
+## POST /api/tickets/admin/:id/transfer
+
+**Role:** `PAYPAC`
+
+Force-transfers a ticket to another user, bypassing the normal transfer flow. The ticket token is regenerated and previous device credentials are cleared.
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Ticket ID to transfer.
+</ParamField>
+
+### Body
+
+<ParamField body="to_user_id" type="number" required>
+  Internal user ID of the new ticket owner.
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">Confirmation of successful transfer.</ResponseField>
+<ResponseField name="ticket" type="object">
+  Updated ticket with the new owner's details.
+  <Expandable title="ticket fields">
+    <ResponseField name="id" type="number">Ticket ID.</ResponseField>
+    <ResponseField name="customer_id" type="number">New owner's user ID.</ResponseField>
+    <ResponseField name="token_ticket" type="string">Newly generated validation token.</ResponseField>
+    <ResponseField name="status_ticket" type="string">Current status.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Invalid request body |
+| `401` | Missing or invalid authentication token |
+| `403` | Caller does not have `PAYPAC` role |
+| `404` | Ticket or target user not found |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url "https://api.paypac.com.co/api/tickets/admin/123/transfer" \
+  --header "Authorization: Bearer <token>" \
+  --header "Content-Type: application/json" \
+  --data '{"to_user_id": 456}'
+```
+
+</CodeGroup>
+
+---
+
+## GET /api/tickets/my-tickets
+
+**Roles:** All authenticated roles
+
+Returns all tickets owned by the authenticated user (their wallet).
+
+### Query parameters
+
+<ParamField query="status" type="string">
+  Filter by one status value or a comma-separated list (e.g., `PAID,ACTIVE`).
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="count" type="number">Total tickets returned.</ResponseField>
+<ResponseField name="tickets" type="object[]">
+  Array of ticket objects.
+  <Expandable title="ticket fields">
+    <ResponseField name="id" type="number">Ticket ID.</ResponseField>
+    <ResponseField name="event_id" type="number">Event ID.</ResponseField>
+    <ResponseField name="reference_ticket" type="string">Unique ticket reference.</ResponseField>
+    <ResponseField name="booking_ticket" type="string">Booking number.</ResponseField>
+    <ResponseField name="status_ticket" type="string">Current status.</ResponseField>
+    <ResponseField name="ticket_first_time" type="number">`1` = unused, `0` = used.</ResponseField>
+    <ResponseField name="ev_name" type="string">Event name.</ResponseField>
+    <ResponseField name="ev_date_event" type="string">Event date.</ResponseField>
+    <ResponseField name="ev_cover" type="string">Event cover image URL.</ResponseField>
+    <ResponseField name="ev_place_address" type="string">Venue address.</ResponseField>
+    <ResponseField name="loc_name_locality" type="string">Locality name.</ResponseField>
+    <ResponseField name="loc_bkg_color" type="string">Locality background color (hex).</ResponseField>
+    <ResponseField name="loc_title_color" type="string">Locality title color (hex).</ResponseField>
+    <ResponseField name="loc_text_color" type="string">Locality text color (hex).</ResponseField>
+    <ResponseField name="created_at" type="string">Purchase timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Unexpected server error |
+| `401` | Missing or invalid authentication token |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url "https://api.paypac.com.co/api/tickets/my-tickets?status=PAID,ACTIVE" \
+  --header "Authorization: Bearer <token>"
+```
+
+</CodeGroup>
+
+---
+
+## GET /api/tickets/upcoming
+
+**Roles:** All authenticated roles
+
+Returns the caller's tickets for events occurring within the next `days` days. Useful for push-notification scheduling.
+
+### Query parameters
+
+<ParamField query="days" type="number" default="7">
+  Look-ahead window in days. Must be a positive integer.
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="count" type="number">Number of upcoming tickets.</ResponseField>
+<ResponseField name="tickets" type="object[]">
+  Array of upcoming ticket objects. Same shape as the `my-tickets` response.
+</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Invalid query parameter |
+| `401` | Missing or invalid authentication token |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url "https://api.paypac.com.co/api/tickets/upcoming?days=3" \
+  --header "Authorization: Bearer <token>"
+```
+
+</CodeGroup>
+
+---
+
+## GET /api/tickets/event/:eventId/stats
+
+**Roles:** `ORGANIZER`, `PAYPAC`, `STAFF`
+
+Returns aggregate ticket counts for a specific event, broken down by status.
+
+### Path parameters
+
+<ParamField path="eventId" type="number" required>
+  Event ID.
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="stats" type="object">
+  <Expandable title="stats fields" defaultOpen={true}>
+    <ResponseField name="total" type="number">Total tickets issued for the event.</ResponseField>
+    <ResponseField name="byStatus" type="object">
+      <Expandable title="byStatus fields">
+        <ResponseField name="PAID" type="number">Tickets in `PAID` status.</ResponseField>
+        <ResponseField name="ACTIVE" type="number">Tickets in `ACTIVE` status.</ResponseField>
+        <ResponseField name="USED" type="number">Tickets in `USED` status.</ResponseField>
+        <ResponseField name="TRANSFERRED" type="number">Tickets in `TRANSFERRED` status.</ResponseField>
+        <ResponseField name="CANCELED" type="number">Tickets in `CANCELED` status.</ResponseField>
+      </Expandable>
+    </ResponseField>
+    <ResponseField name="used" type="number">Count of tickets that have been scanned (`ticket_first_time = 0`).</ResponseField>
+    <ResponseField name="unused" type="number">Count of tickets not yet scanned.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Invalid event ID or server error |
+| `401` | Missing or invalid authentication token |
+| `403` | `ORGANIZER` is not the owner of this event |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url "https://api.paypac.com.co/api/tickets/event/42/stats" \
+  --header "Authorization: Bearer <token>"
+```
+
+</CodeGroup>
+
+---
+
+## PATCH /api/tickets/:id/public-key
+
+**Roles:** `CUSTOMER`, `PAYPAC`
+
+Registers the attendee's device RSA public key on a ticket to enable NFC-based entry validation. Only the current ticket owner can register a key.
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Ticket ID.
+</ParamField>
+
+### Body
+
+<ParamField body="device_public_key" type="string" required>
+  PEM-encoded RSA public key from the attendee's device. Minimum 10 characters.
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">Confirmation that the public key was registered.</ResponseField>
+<ResponseField name="ticket" type="object">Updated ticket object with `device_public_key` set.</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Key too short or malformed |
+| `401` | Missing or invalid authentication token |
+| `403` | Caller is not the ticket owner |
+| `404` | Ticket not found |
+
+<CodeGroup>
+
+```bash cURL
+curl --request PATCH \
+  --url "https://api.paypac.com.co/api/tickets/123/public-key" \
+  --header "Authorization: Bearer <token>" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "device_public_key": "-----BEGIN PUBLIC KEY-----\nMIIBIjAN...\n-----END PUBLIC KEY-----"
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## GET /api/tickets/:id/totp-secret
+
+**Roles:** `CUSTOMER`, `PAYPAC`
+
+Retrieves the TOTP secret for dynamic QR code generation. The secret is assigned at ticket creation and rotated on every ownership transfer.
+
+<Info>
+  Use this secret with a standard TOTP library (RFC 6238) to generate 30-second rolling codes that can be scanned at the venue instead of a static QR.
+</Info>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Ticket ID.
+</ParamField>
+
+### Response
+
+<ResponseField name="totp_secret" type="string">Base32-encoded TOTP secret.</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `401` | Missing or invalid authentication token |
+| `403` | Caller is not the ticket owner |
+| `404` | Ticket not found or TOTP not yet configured |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url "https://api.paypac.com.co/api/tickets/123/totp-secret" \
+  --header "Authorization: Bearer <token>"
+```
+
+</CodeGroup>
+
+---
+
+## GET /api/tickets/:id
+
+**Roles:** All authenticated roles
+
+Returns a single ticket. Only the current ticket owner receives the full record.
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Ticket ID.
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="ticket" type="object">
+  Full ticket record.
+  <Expandable title="ticket fields">
+    <ResponseField name="id" type="number">Ticket ID.</ResponseField>
+    <ResponseField name="transaction_id" type="number">Payment transaction that created this ticket.</ResponseField>
+    <ResponseField name="event_id" type="number">Event ID.</ResponseField>
+    <ResponseField name="customer_id" type="number">Current owner's user ID.</ResponseField>
+    <ResponseField name="customer_uid" type="string">Current owner's Firebase UID.</ResponseField>
+    <ResponseField name="reference_ticket" type="string">Unique ticket reference.</ResponseField>
+    <ResponseField name="booking_ticket" type="string">Booking number.</ResponseField>
+    <ResponseField name="token_ticket" type="string">Validation token (used to build the QR payload).</ResponseField>
+    <ResponseField name="device_uuid" type="string">UUID of the registered device, if any.</ResponseField>
+    <ResponseField name="ticket_first_time" type="number">`1` = unused, `0` = used.</ResponseField>
+    <ResponseField name="status_ticket" type="string">Current status.</ResponseField>
+    <ResponseField name="ev_name" type="string">Snapshot event name.</ResponseField>
+    <ResponseField name="ev_date_event" type="string">Snapshot event date.</ResponseField>
+    <ResponseField name="ev_cover" type="string">Snapshot event cover image URL.</ResponseField>
+    <ResponseField name="ev_place_address" type="string">Snapshot venue address.</ResponseField>
+    <ResponseField name="loc_name_locality" type="string">Locality name.</ResponseField>
+    <ResponseField name="loc_bkg_color" type="string">Locality background color (hex).</ResponseField>
+    <ResponseField name="loc_title_color" type="string">Locality title color (hex).</ResponseField>
+    <ResponseField name="loc_text_color" type="string">Locality text color (hex).</ResponseField>
+    <ResponseField name="used_at" type="string">Timestamp of first scan, or `null` if unused.</ResponseField>
+    <ResponseField name="created_at" type="string">Ticket creation timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Ticket not found or caller is not the owner |
+| `401` | Missing or invalid authentication token |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url "https://api.paypac.com.co/api/tickets/123" \
+  --header "Authorization: Bearer <token>"
+```
+
+</CodeGroup>
+
+---
+
+## POST /api/tickets/:id/transfer
+
+**Roles:** All authenticated roles
+
+Initiates a ticket transfer, peer-to-peer sale, or gift to another user. The ticket token is regenerated, device credentials from the previous owner are cleared, and a [TicketTransaction](/api/ticket-transactions) audit record is created. Sales begin with `status_ticket = PENDING` in the TicketTransaction; transfers and gifts complete immediately.
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Ticket ID to transfer.
+</ParamField>
+
+### Body
+
+<ParamField body="to_user_id" type="number" required>
+  Internal user ID of the recipient.
+</ParamField>
+
+<ParamField body="to_user_uid" type="string" required>
+  Firebase UID of the recipient.
+</ParamField>
+
+<ParamField body="to_user_id_phone" type="string" required>
+  Phone UUID of the recipient's device.
+</ParamField>
+
+<ParamField body="from_user_id_phone" type="string" required>
+  Phone UUID of the sender's device.
+</ParamField>
+
+<ParamField body="transaction_type" type="string" required>
+  Transfer mode. One of `transfer`, `sale`, or `gift`.
+</ParamField>
+
+<ParamField body="description" type="string">
+  Optional message to attach to the transfer.
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="message" type="string">Human-readable confirmation.</ResponseField>
+<ResponseField name="ticket" type="object">Updated ticket with the new owner's details and a regenerated token.</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Ticket not found, not owned by caller, already used, or in a non-transferable status |
+| `401` | Missing or invalid authentication token |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url "https://api.paypac.com.co/api/tickets/123/transfer" \
+  --header "Authorization: Bearer <token>" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "to_user_id": 456,
+    "to_user_uid": "firebase-uid-456",
+    "to_user_id_phone": "device-uuid-456",
+    "from_user_id_phone": "device-uuid-123",
+    "transaction_type": "gift",
+    "description": "Enjoy the show!"
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## POST /api/tickets/:id/validate
+
+**Roles:** `PAYPAC`, `ORGANIZER`, `STAFF`, `STAFF_PROMOTER`
+
+Validates a ticket at event entry. Three validation methods are supported:
+
+1. **QR token** — standard `token_ticket` value from the QR code.
+2. **QR token + device UUID** — adds device-binding check to detect screenshot fraud.
+3. **TOTP** — 6-digit rolling code from the attendee's app (pass via a separate NFC endpoint).
+
+`STAFF` and `STAFF_PROMOTER` must have checked in to the event. `ORGANIZER` must own the event. Validation only succeeds within the event's check-in window (`date_checkin_open` – `date_checkin_close`).
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Ticket ID (used for routing; the actual lookup resolves the ticket from `qr_token`).
+</ParamField>
+
+### Body
+
+<ParamField body="qr_token" type="string" required>
+  Ticket token string from the QR code. Minimum 32 characters.
+</ParamField>
+
+<ParamField body="event_id" type="number" required>
+  ID of the event where validation is taking place.
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="message" type="string">Welcome message for the attendee.</ResponseField>
+<ResponseField name="ticket" type="object">Updated ticket with `ticket_first_time = 0` and `used_at` populated.</ResponseField>
+<ResponseField name="scanner_id" type="number">User ID of the scanner who validated the ticket.</ResponseField>
+<ResponseField name="scanner_role" type="string">Role of the scanner.</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Token invalid, ticket already used, wrong event, check-in window closed, or scanner not assigned to event |
+| `401` | Missing or invalid authentication token |
+| `403` | Caller role cannot validate tickets |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url "https://api.paypac.com.co/api/tickets/123/validate" \
+  --header "Authorization: Bearer <token>" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "qr_token": "a3f9b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3",
+    "event_id": 42
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## DELETE /api/tickets/:id
+
+**Roles:** All authenticated roles
+
+Soft-cancels a ticket. Only the current owner or a `PAYPAC` user may cancel. Tickets that have already been used (`ticket_first_time = 0`) cannot be canceled.
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Ticket ID to cancel.
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="message" type="string">Confirmation message.</ResponseField>
+<ResponseField name="ticket" type="object">Updated ticket with `status_ticket = "CANCELED"`.</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Ticket not found, already used, or caller lacks permission |
+| `401` | Missing or invalid authentication token |
+
+<CodeGroup>
+
+```bash cURL
+curl --request DELETE \
+  --url "https://api.paypac.com.co/api/tickets/123" \
+  --header "Authorization: Bearer <token>"
+```
+
+</CodeGroup>

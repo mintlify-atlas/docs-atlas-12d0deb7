@@ -1,0 +1,175 @@
+---
+title: "Notifications"
+description: "Email, SMS, and push notification delivery"
+---
+
+## Overview
+
+PayPac delivers notifications through three channels:
+
+- **Email** — queue-based delivery via Brevo (Sendinblue)
+- **SMS** — 2FA codes via Onurix
+- **Push** — device notifications via Firebase Cloud Messaging (FCM)
+
+<Tabs>
+  <Tab title="Email">
+    ## Email notifications
+
+    Emails are not sent immediately. Instead, they are written to a queue and processed by a background cron job that runs every 5 minutes.
+
+    ### Queue an email
+
+    Any authenticated user can queue an email with `POST /api/email-queue`.
+
+    <CodeGroup>
+    ```bash curl
+    curl -X POST https://api.paypac.com.co/api/email-queue \
+      -H "Authorization: Bearer <token>" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "userId": 12,
+        "email": "buyer@example.com",
+        "templateCode": "TICKET_PURCHASE",
+        "variables": {
+          "user_name": "María García",
+          "event_name": "Festival Electrónico Bogotá 2026",
+          "tickets_qty": 2,
+          "total_amount": "240,000"
+        }
+      }'
+    ```
+    </CodeGroup>
+
+    The `templateCode` must match one of the registered templates. All `requiredVariables` for that template must be present or the request returns a `400` error.
+
+    ### Email templates
+
+    | Template code | Trigger | Required variables |
+    |---|---|---|
+    | `REGISTRATION_VERIFY_MAIL` | User registration — verify email | `user_name`, `otp_code`, `verify_link` |
+    | `REGISTRATION_ACCEPT` | Staff invitation accepted | `name`, `last_name`, `inviter_name`, `inviter_last_name`, `role`, `email`, `accept_link` |
+    | `LOGIN_OTP` | OTP login | `user_name`, `otp_code` |
+    | `PASSWORD_RESET` | Password reset request | `user_name`, `otp_code` |
+    | `NOTIFICATION_ASSIGNING_EVENT` | Staff assigned to an event | `user_name`, `name`, `image`, `date_event`, `place_address`, `company`, `rol` |
+    | `INVOICE_STATUS` | Payment status update | `user_name`, `num_invoice`, `status`, `status_message`, `amount`, `payment_method_type` |
+    | `TICKET_PURCHASE` | Successful ticket purchase | `user_name`, `event_name`, `tickets_qty`, `total_amount` |
+    | `TICKET_TRANSFER_RECEIVED` | Ticket transferred to a registered user | `recipient_name`, `sender_name`, `sender_message`, `event_name`, `event_image`, `event_date`, `event_address`, `locality_name`, `wallet_link` |
+    | `TICKET_TRANSFER_RECEIVED_UNREGISTERED` | Ticket transferred to a user without an account | `sender_name`, `event_name`, `appstore_link`, `playstore_link` |
+
+    <Note>
+      The system automatically queues `NOTIFICATION_ASSIGNING_EVENT` when you assign a staff member to an event, and `TICKET_PURCHASE` after a successful payment webhook. You do not need to queue these manually in those flows.
+    </Note>
+
+    ### Queue management (PAYPAC only)
+
+    | Endpoint | Description |
+    |---|---|
+    | `POST /api/email-queue/process` | Manually trigger pending message processing |
+    | `GET /api/email-queue/stats` | Queue statistics (pending / sent / failed counts) |
+    | `POST /api/email-queue/:id/retry` | Re-queue a failed message |
+    | `DELETE /api/email-queue/:id` | Delete a message |
+    | `POST /api/email-queue/clean-old` | Delete messages older than N days |
+
+    ### Viewing your messages
+
+    <CodeGroup>
+    ```bash curl — My messages
+    curl -X GET https://api.paypac.com.co/api/email-queue/my-messages \
+      -H "Authorization: Bearer <token>"
+    ```
+    </CodeGroup>
+  </Tab>
+
+  <Tab title="SMS">
+    ## SMS notifications
+
+    SMS messages are used exclusively for two-factor authentication (2FA) code delivery via the Onurix provider. SMS endpoints are public and do not require authentication.
+
+    ### Send a 2FA code
+
+    <CodeGroup>
+    ```bash curl
+    curl -X POST https://api.paypac.com.co/api/sms/getcode2FA \
+      -H "Content-Type: application/json" \
+      -d '{
+        "phone": "+573001234567"
+      }'
+    ```
+    </CodeGroup>
+
+    - `phone` must be 10–15 digits and may include a leading `+`.
+    - Returns `409` if the phone number is already registered to an existing account.
+
+    ### Verify a 2FA code
+
+    <CodeGroup>
+    ```bash curl
+    curl -X POST https://api.paypac.com.co/api/sms/verifycode2FA \
+      -H "Content-Type: application/json" \
+      -d '{
+        "phone": "+573001234567",
+        "code": "481523"
+      }'
+    ```
+    </CodeGroup>
+
+    - `code` must be exactly 6 digits.
+    - Returns `400` if the code is invalid or expired.
+
+    ### Check if a phone is registered
+
+    <CodeGroup>
+    ```bash curl
+    curl -X POST https://api.paypac.com.co/api/sms/check-phone \
+      -H "Content-Type: application/json" \
+      -d '{
+        "phone": "+573001234567"
+      }'
+    ```
+    </CodeGroup>
+
+    Returns `{ "exists": true, "redirect": "login" }` or `{ "exists": false, "redirect": "register" }`.
+  </Tab>
+
+  <Tab title="Push (FCM)">
+    ## Push notifications (Firebase FCM)
+
+    PayPac uses Firebase Admin SDK to send push notifications to mobile devices. Each device registers a token with the API that is used to target that device.
+
+    ### Register or update a device token
+
+    Call this endpoint after the app obtains a new FCM registration token (e.g. on app startup or when FCM rotates the token).
+
+    <CodeGroup>
+    ```bash curl — Register / update token
+    curl -X PUT https://api.paypac.com.co/api/users/fcm-token \
+      -H "Authorization: Bearer <token>" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "fcm_token": "<firebase_registration_token>"
+      }'
+    ```
+    </CodeGroup>
+
+    All roles can register an FCM token.
+
+    ### Remove a device token (logout)
+
+    Remove the stored token when the user signs out so they stop receiving push notifications on that device.
+
+    <CodeGroup>
+    ```bash curl
+    curl -X DELETE https://api.paypac.com.co/api/users/fcm-token \
+      -H "Authorization: Bearer <token>"
+    ```
+    </CodeGroup>
+
+    <Note>
+      Push notifications are sent server-side by the Firebase Admin SDK when key events occur (e.g. payment confirmed, ticket transferred). There is no public endpoint to send push notifications directly; they are triggered by internal service events.
+    </Note>
+  </Tab>
+</Tabs>
+
+## Real-time events (Socket.IO)
+
+In addition to the channels above, PayPac emits real-time Socket.IO events for time-sensitive updates such as payment status changes and ticket validation confirmations. See the WebSockets infrastructure page for connection details and the full list of events.

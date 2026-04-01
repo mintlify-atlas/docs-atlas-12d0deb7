@@ -1,0 +1,481 @@
+---
+title: "Users"
+description: "Manage user profiles, search users by email or phone, and filter by role. Access is scoped by the authenticated user's role."
+---
+
+<Info>
+  All endpoints require a valid Firebase ID token passed as `Authorization: Bearer <token>`. Access rules depend on the caller's role: `PAYPAC` can see and manage all users; `ORGANIZER` is scoped to their own company's users.
+</Info>
+
+---
+
+## **GET** /api/users
+
+Returns a list of users. Scope is automatically applied based on the caller's role:
+
+- **PAYPAC** — sees all users in the system.
+- **ORGANIZER** — sees only users belonging to their company.
+
+**Required role:** `PAYPAC` or `ORGANIZER`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Query parameters
+
+<ParamField query="role" type="string">
+  Filter by role. One of: `PAYPAC`, `ORGANIZER`, `STAFF`, `STAFF_PROMOTER`, `PROMOTER`, `CUSTOMER`.
+</ParamField>
+
+<ParamField query="company_id" type="string">
+  Filter by company ID (numeric string).
+</ParamField>
+
+<ParamField query="status" type="string">
+  Filter by account status. `0` = inactive, `1` = active.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="total" type="number">
+  Total number of users returned.
+</ResponseField>
+
+<ResponseField name="users" type="object[]">
+  List of user records.
+
+  <Expandable title="user properties">
+    <ResponseField name="id" type="number">User ID.</ResponseField>
+    <ResponseField name="email" type="string">Email address.</ResponseField>
+    <ResponseField name="name" type="string">First name.</ResponseField>
+    <ResponseField name="last_name" type="string">Last name.</ResponseField>
+    <ResponseField name="role" type="string">User role.</ResponseField>
+    <ResponseField name="phone_number" type="string">Phone number.</ResponseField>
+    <ResponseField name="company_id" type="number">Associated company ID, or `null`.</ResponseField>
+    <ResponseField name="status" type="number">`0` = inactive, `1` = active.</ResponseField>
+    <ResponseField name="createdAt" type="string">ISO 8601 creation timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Insufficient role permissions. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url 'https://api.paypac.com.co/api/users?role=STAFF&status=1' \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/users/me/profile
+
+Returns the full profile of the currently authenticated user, including all stored fields.
+
+**Required role:** Any authenticated user (`PAYPAC`, `ORGANIZER`, `STAFF`, `STAFF_PROMOTER`, `PROMOTER`, `CUSTOMER`)
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="id" type="number">User ID.</ResponseField>
+<ResponseField name="email" type="string">Email address.</ResponseField>
+<ResponseField name="name" type="string">First name.</ResponseField>
+<ResponseField name="last_name" type="string">Last name.</ResponseField>
+<ResponseField name="phone_number" type="string">Phone number.</ResponseField>
+<ResponseField name="role" type="string">User role.</ResponseField>
+<ResponseField name="company_id" type="number">Associated company ID, or `null`.</ResponseField>
+<ResponseField name="firebase_uid" type="string">Firebase UID.</ResponseField>
+<ResponseField name="num_doc" type="string">Identity document number, or `null`.</ResponseField>
+<ResponseField name="type_doc" type="string">Document type (`CC`, `CE`, `PA`, `TI`, `NIT`, `SSN`).</ResponseField>
+<ResponseField name="verified_user" type="number">`0` = unverified, `1` = verified.</ResponseField>
+<ResponseField name="status" type="number">`0` = inactive, `1` = active.</ResponseField>
+<ResponseField name="city" type="string">City, or `null`.</ResponseField>
+<ResponseField name="birth_date" type="string">Birth date in ISO 8601, or `null`.</ResponseField>
+<ResponseField name="lang_user" type="string">Preferred language code, or `null`.</ResponseField>
+<ResponseField name="createdAt" type="string">ISO 8601 creation timestamp.</ResponseField>
+<ResponseField name="updatedAt" type="string">ISO 8601 last-update timestamp.</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `500`  | Internal server error. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/users/me/profile \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/users/stats/all
+
+Returns aggregate statistics about users in the system (counts by role, activity, etc.).
+
+**Required role:** `PAYPAC` only
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="total" type="number">Total number of registered users.</ResponseField>
+<ResponseField name="byRole" type="object">
+  Counts of users broken down by role.
+
+  <Expandable title="byRole properties">
+    <ResponseField name="PAYPAC" type="number">Count of PAYPAC users.</ResponseField>
+    <ResponseField name="ORGANIZER" type="number">Count of ORGANIZER users.</ResponseField>
+    <ResponseField name="STAFF" type="number">Count of STAFF users.</ResponseField>
+    <ResponseField name="STAFF_PROMOTER" type="number">Count of STAFF_PROMOTER users.</ResponseField>
+    <ResponseField name="PROMOTER" type="number">Count of PROMOTER users.</ResponseField>
+    <ResponseField name="CUSTOMER" type="number">Count of CUSTOMER users.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PAYPAC` role. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/users/stats/all \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/users/search
+
+Search for users by email address or phone number, with an optional role filter. Useful for locating users before assigning them as staff or promoters.
+
+**Required role:** `PAYPAC` or `ORGANIZER`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Query parameters
+
+<ParamField query="q" type="string" required>
+  Search term. Matched against email and phone number. Minimum 3 characters.
+</ParamField>
+
+<ParamField query="role" type="string">
+  Comma-separated list of roles to filter results. Example: `STAFF,STAFF_PROMOTER`. Valid values: `PAYPAC`, `ORGANIZER`, `STAFF`, `STAFF_PROMOTER`, `PROMOTER`, `CUSTOMER`.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="success" type="boolean">
+  `true` when the request completed successfully.
+</ResponseField>
+
+<ResponseField name="total" type="number">
+  Number of users matched.
+</ResponseField>
+
+<ResponseField name="users" type="object[]">
+  Matching user records.
+
+  <Expandable title="user properties">
+    <ResponseField name="id" type="number">User ID.</ResponseField>
+    <ResponseField name="email" type="string">Email address.</ResponseField>
+    <ResponseField name="name" type="string">First name.</ResponseField>
+    <ResponseField name="last_name" type="string">Last name.</ResponseField>
+    <ResponseField name="phone_number" type="string">Phone number.</ResponseField>
+    <ResponseField name="role" type="string">User role.</ResponseField>
+    <ResponseField name="company_id" type="number">Company ID, or `null`.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | `q` is too short (under 3 characters) or roles are invalid. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Insufficient role permissions. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url 'https://api.paypac.com.co/api/users/search?q=carlos&role=STAFF,PROMOTER' \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/users/role/:role
+
+Returns all users that have a specific role.
+
+**Required role:** `PAYPAC` only
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="role" type="string" required>
+  Role to filter by. One of: `PAYPAC`, `ORGANIZER`, `STAFF`, `STAFF_PROMOTER`, `PROMOTER`, `CUSTOMER`.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="total" type="number">
+  Number of users with the specified role.
+</ResponseField>
+
+<ResponseField name="users" type="object[]">
+  List of matching user records. Same structure as the user objects returned by [GET /api/users](#get-apiusers).
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PAYPAC` role. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/users/role/ORGANIZER \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/users/:id
+
+Returns a single user by their database ID. Access is enforced:
+
+- A user can always retrieve their own record.
+- An `ORGANIZER` can retrieve users that belong to their company.
+- `PAYPAC` can retrieve any user.
+
+**Required role:** Any authenticated user
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Numeric user ID.
+</ParamField>
+
+### Response `200`
+
+Returns a single user object. Same structure as the user objects returned by [GET /api/users/me/profile](#get-apiusersmeprofile).
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `404`  | User not found or access denied. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/users/42 \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **PUT** /api/users/:id
+
+Updates a user's profile fields. A user can update their own profile; `PAYPAC` can update any user.
+
+**Required role:** Any authenticated user (own record), or `PAYPAC` (any record)
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Numeric user ID.
+</ParamField>
+
+### Request body
+
+All fields are optional. At least one must be provided.
+
+<ParamField body="name" type="string">
+  First name. Minimum 2 characters.
+</ParamField>
+
+<ParamField body="last_name" type="string">
+  Last name. Minimum 2 characters.
+</ParamField>
+
+<ParamField body="email" type="string">
+  Email address. Must be valid and unique.
+</ParamField>
+
+<ParamField body="phone_number" type="string">
+  Phone number.
+</ParamField>
+
+<ParamField body="num_doc" type="string">
+  Identity document number.
+</ParamField>
+
+<ParamField body="type_doc" type="number">
+  Document type integer identifier.
+</ParamField>
+
+<ParamField body="role" type="string">
+  Role to assign. One of: `PAYPAC`, `ORGANIZER`, `STAFF`, `STAFF_PROMOTER`, `PROMOTER`, `CUSTOMER`.
+</ParamField>
+
+<ParamField body="company_id" type="number">
+  Company association. Pass `null` to remove.
+</ParamField>
+
+<ParamField body="lang_user" type="string">
+  Preferred language code (e.g., `"es"`, `"en"`).
+</ParamField>
+
+<ParamField body="verified_user" type="number">
+  Verification status. `0` = unverified, `1` = verified.
+</ParamField>
+
+<ParamField body="status" type="number">
+  Account status. `0` = inactive, `1` = active.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="message" type="string">
+  Confirmation: `"Usuario actualizado exitosamente"`.
+</ResponseField>
+
+<ResponseField name="user" type="object">
+  The updated user record.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Validation error or access denied. |
+| `401`  | Missing or invalid Bearer token. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request PUT \
+  --url https://api.paypac.com.co/api/users/42 \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "name": "María Elena",
+    "lang_user": "es",
+    "status": 1
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## **DELETE** /api/users/:id
+
+Permanently deletes a user record.
+
+**Required role:** `PAYPAC` only
+
+<Warning>This action is irreversible. Deleting a user removes their account from the database.</Warning>
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Numeric user ID to delete.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="message" type="string">
+  Confirmation: `"Usuario eliminado exitosamente"`.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Could not delete (e.g., user has associated records). |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PAYPAC` role. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request DELETE \
+  --url https://api.paypac.com.co/api/users/42 \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>

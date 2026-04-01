@@ -1,0 +1,1180 @@
+---
+title: "Venues"
+description: "Manage numbered venues with zones, rows, seats, and per-event seat status. Use these endpoints to build the seating chart for numbered-seat events."
+---
+
+<Info>
+  Venues are used exclusively with events that have `type_venue: NUMERADO`. The data model follows a strict hierarchy:
+
+  **Venue → Zone → Row → Seat → SeatStatus (per event)**
+
+  A venue is a reusable physical space (e.g., a theatre). Zones subdivide the venue into sections. Each zone contains rows, each row contains seats, and each seat has a status record per event (`AVAILABLE`, `HELD`, `SOLD`, or `BLOCKED`).
+</Info>
+
+All endpoints require a valid Firebase ID token: `Authorization: Bearer <token>`.
+
+---
+
+## Venues
+
+### **GET** /api/venues
+
+Lists all venues with optional filtering by name, venue type, and seating format.
+
+**Required role:** `PAYPAC`, `ORGANIZER`, `STAFF`, `STAFF_PROMOTER`, or `PROMOTER`
+
+#### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+#### Query parameters
+
+<ParamField query="search" type="string">
+  Search term matched against the venue name.
+</ParamField>
+
+<ParamField query="type_place" type="string">
+  Filter by venue type. One of: `CLUB`, `DISCOTECA`, `TEATRO`, `CINE`, `ESTADIO`.
+</ParamField>
+
+<ParamField query="place_type" type="string">
+  Filter by seating format. `NUMERADO` or `SIN_NUMERAR`.
+</ParamField>
+
+#### Response `200`
+
+<ResponseField name="id" type="number">Venue ID.</ResponseField>
+<ResponseField name="name_place" type="string">Venue name.</ResponseField>
+<ResponseField name="type_place" type="string">Venue type (`CLUB`, `DISCOTECA`, `TEATRO`, `CINE`, `ESTADIO`).</ResponseField>
+<ResponseField name="place_type" type="string">Seating format (`NUMERADO` or `SIN_NUMERAR`).</ResponseField>
+<ResponseField name="capacity" type="number">Total seat count.</ResponseField>
+<ResponseField name="map_place" type="object">Interactive map JSON, or `null` if not yet defined.</ResponseField>
+<ResponseField name="createdAt" type="string">ISO 8601 creation timestamp.</ResponseField>
+
+#### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Insufficient role. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url 'https://api.paypac.com.co/api/venues?type_place=TEATRO&search=Nacional' \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+### **GET** /api/venues/:id
+
+Returns a single venue by ID with its zone list and seat counts.
+
+**Required role:** `PAYPAC`, `ORGANIZER`, `STAFF`, `STAFF_PROMOTER`, or `PROMOTER`
+
+#### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+#### Path parameters
+
+<ParamField path="id" type="number" required>
+  Numeric venue ID.
+</ParamField>
+
+#### Response `200`
+
+Returns the venue object plus a `zones` array summarizing each zone and its seat count.
+
+#### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `404`  | Venue not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/venues/3 \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+### **GET** /api/venues/:id/layout
+
+Returns the complete layout of a venue: all zones, with their rows and seats nested. Used to render the interactive seating chart.
+
+**Required role:** `PAYPAC` or `ORGANIZER`
+
+#### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+#### Path parameters
+
+<ParamField path="id" type="number" required>
+  Numeric venue ID.
+</ParamField>
+
+#### Response `200`
+
+<ResponseField name="id" type="number">Venue ID.</ResponseField>
+<ResponseField name="name_place" type="string">Venue name.</ResponseField>
+<ResponseField name="capacity" type="number">Total seat count.</ResponseField>
+<ResponseField name="zones" type="object[]">
+  Zones within the venue.
+
+  <Expandable title="zone properties">
+    <ResponseField name="id" type="number">Zone ID.</ResponseField>
+    <ResponseField name="name" type="string">Zone name.</ResponseField>
+    <ResponseField name="capacity" type="number">Zone seat count.</ResponseField>
+    <ResponseField name="rows" type="object[]">
+      Rows within the zone.
+
+      <Expandable title="row properties">
+        <ResponseField name="id" type="number">Row ID.</ResponseField>
+        <ResponseField name="name" type="string">Row label (e.g., `"A"`, `"B"`).</ResponseField>
+        <ResponseField name="seats" type="object[]">
+          Seats within the row.
+
+          <Expandable title="seat properties">
+            <ResponseField name="id" type="number">Seat ID.</ResponseField>
+            <ResponseField name="seat_number" type="string">Seat label (e.g., `"A1"`, `"H23"`).</ResponseField>
+            <ResponseField name="status" type="string">Physical seat status: `ACTIVE` or `BLOCKED_MAINTENANCE`.</ResponseField>
+          </Expandable>
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+#### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Insufficient role. |
+| `404`  | Venue not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/venues/3/layout \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+### **POST** /api/venues
+
+Creates a new venue.
+
+**Required role:** `PAYPAC` only
+
+#### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+#### Request body
+
+<ParamField body="name_place" type="string" required>
+  Venue name. Minimum 2 characters.
+</ParamField>
+
+<ParamField body="type_place" type="string" required>
+  Venue type. One of: `CLUB`, `DISCOTECA`, `TEATRO`, `CINE`, `ESTADIO`.
+</ParamField>
+
+<ParamField body="place_type" type="string" required>
+  Seating format. `NUMERADO` or `SIN_NUMERAR`.
+</ParamField>
+
+<ParamField body="capacity" type="number" required>
+  Total expected seat count. Positive integer. This should match the sum of all zone capacities once zones are created.
+</ParamField>
+
+<ParamField body="map_place" type="object">
+  Optional JSON object representing the interactive map layout. This can be updated later via [PATCH /api/venues/:id/map](#patch-apivenueside-map).
+</ParamField>
+
+#### Response `201`
+
+Returns the created venue object.
+
+#### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Validation error. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PAYPAC` role. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://api.paypac.com.co/api/venues \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "name_place": "Teatro Nacional",
+    "type_place": "TEATRO",
+    "place_type": "NUMERADO",
+    "capacity": 800
+  }'
+```
+
+</CodeGroup>
+
+---
+
+### **PUT** /api/venues/:id
+
+Updates one or more fields of an existing venue. At least one field must be provided.
+
+**Required role:** `PAYPAC` only
+
+#### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+#### Path parameters
+
+<ParamField path="id" type="number" required>
+  Numeric venue ID.
+</ParamField>
+
+#### Request body
+
+<ParamField body="name_place" type="string">Updated venue name. Minimum 2 characters.</ParamField>
+<ParamField body="type_place" type="string">Updated venue type.</ParamField>
+<ParamField body="place_type" type="string">Updated seating format.</ParamField>
+<ParamField body="capacity" type="number">Updated capacity. Positive integer.</ParamField>
+
+#### Response `200`
+
+Returns the updated venue object.
+
+#### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Validation error or no fields provided. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PAYPAC` role. |
+| `404`  | Venue not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request PUT \
+  --url https://api.paypac.com.co/api/venues/3 \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{"name_place": "Teatro Nacional Simón Bolívar", "capacity": 850}'
+```
+
+</CodeGroup>
+
+---
+
+### **PATCH** /api/venues/:id/map
+
+Replaces the venue's interactive map JSON. The map stores x/y coordinate data used to render the visual seating chart in the frontend.
+
+**Required role:** `PAYPAC` only
+
+#### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+#### Path parameters
+
+<ParamField path="id" type="number" required>
+  Numeric venue ID.
+</ParamField>
+
+#### Request body
+
+<ParamField body="map_place" type="object" required>
+  A JSON object representing the updated map layout. The schema is flexible — it is stored as-is and consumed by the frontend renderer.
+</ParamField>
+
+#### Response `200`
+
+Returns the updated venue object with the new `map_place`.
+
+#### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | `map_place` is missing or not a valid JSON object. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PAYPAC` role. |
+| `404`  | Venue not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request PATCH \
+  --url https://api.paypac.com.co/api/venues/3/map \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "map_place": {
+      "version": 2,
+      "zones": [
+        { "id": 10, "x": 100, "y": 200, "width": 400, "height": 300 }
+      ]
+    }
+  }'
+```
+
+</CodeGroup>
+
+---
+
+### **DELETE** /api/venues/:id
+
+Permanently deletes a venue. The venue must have no zones and no associated events.
+
+**Required role:** `PAYPAC` only
+
+<Warning>Deletion fails if the venue has any zones or is linked to events. Remove all zones first.</Warning>
+
+#### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+#### Path parameters
+
+<ParamField path="id" type="number" required>
+  Numeric venue ID.
+</ParamField>
+
+#### Response `200`
+
+<ResponseField name="message" type="string">Confirmation message.</ResponseField>
+
+#### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Venue has zones or is linked to events. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PAYPAC` role. |
+| `404`  | Venue not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request DELETE \
+  --url https://api.paypac.com.co/api/venues/3 \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## Zones
+
+Zones are sections within a venue (e.g., `"Luneta Izquierda"`, `"Platea Alta"`, `"VIP"`).
+
+### **GET** /api/venues/zones/by-place/:place_id
+
+Returns all zones that belong to a specific venue.
+
+**Required role:** `PAYPAC`, `ORGANIZER`, `STAFF`, `STAFF_PROMOTER`, or `PROMOTER`
+
+#### Path parameters
+
+<ParamField path="place_id" type="number" required>
+  Numeric venue ID.
+</ParamField>
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/venues/zones/by-place/3 \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+#### Response `200`
+
+<ResponseField name="zones" type="object[]">
+  <Expandable title="zone properties">
+    <ResponseField name="id" type="number">Zone ID.</ResponseField>
+    <ResponseField name="place_id" type="number">Parent venue ID.</ResponseField>
+    <ResponseField name="name" type="string">Zone name.</ResponseField>
+    <ResponseField name="capacity" type="number">Zone seat count.</ResponseField>
+    <ResponseField name="row_count" type="number">Number of rows in this zone.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+### **GET** /api/venues/zones/:id
+
+Returns a single zone by ID, including its rows and seat counts.
+
+**Required role:** `PAYPAC`, `ORGANIZER`, `STAFF`, `STAFF_PROMOTER`, or `PROMOTER`
+
+#### Path parameters
+
+<ParamField path="id" type="number" required>
+  Numeric zone ID.
+</ParamField>
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/venues/zones/10 \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+### **POST** /api/venues/zones
+
+Creates a new zone within a venue.
+
+**Required role:** `PAYPAC` only
+
+#### Request body
+
+<ParamField body="name" type="string" required>
+  Zone name (e.g., `"Platea"`). Minimum 1 character.
+</ParamField>
+
+<ParamField body="capacity" type="number" required>
+  Number of seats in this zone. Positive integer.
+</ParamField>
+
+<ParamField body="place_id" type="number" required>
+  ID of the parent venue.
+</ParamField>
+
+#### Response `201`
+
+Returns the created zone object.
+
+#### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Validation error. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PAYPAC` role. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://api.paypac.com.co/api/venues/zones \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{"name": "Platea Alta", "capacity": 120, "place_id": 3}'
+```
+
+</CodeGroup>
+
+---
+
+### **PUT** /api/venues/zones/:id
+
+Updates a zone's name or capacity.
+
+**Required role:** `PAYPAC` only
+
+#### Path parameters
+
+<ParamField path="id" type="number" required>Numeric zone ID.</ParamField>
+
+#### Request body
+
+<ParamField body="name" type="string">Updated zone name.</ParamField>
+<ParamField body="capacity" type="number">Updated seat count. Positive integer.</ParamField>
+
+<CodeGroup>
+
+```bash cURL
+curl --request PUT \
+  --url https://api.paypac.com.co/api/venues/zones/10 \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{"name": "Platea Alta VIP", "capacity": 130}'
+```
+
+</CodeGroup>
+
+---
+
+### **DELETE** /api/venues/zones/:id
+
+Deletes a zone. The zone must have no rows.
+
+**Required role:** `PAYPAC` only
+
+#### Path parameters
+
+<ParamField path="id" type="number" required>Numeric zone ID.</ParamField>
+
+<CodeGroup>
+
+```bash cURL
+curl --request DELETE \
+  --url https://api.paypac.com.co/api/venues/zones/10 \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## Rows
+
+Rows are labelled sequences within a zone (e.g., `"A"`, `"B"`, `"H"`).
+
+### **GET** /api/venues/rows/by-zone/:zone_id
+
+Returns all rows in a zone, with each row's seat count.
+
+**Required role:** `PAYPAC`, `ORGANIZER`, `STAFF`, `STAFF_PROMOTER`, or `PROMOTER`
+
+#### Path parameters
+
+<ParamField path="zone_id" type="number" required>Numeric zone ID.</ParamField>
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/venues/rows/by-zone/10 \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+### **GET** /api/venues/rows/:id
+
+Returns a single row by ID, including its seats.
+
+**Required role:** `PAYPAC`, `ORGANIZER`, `STAFF`, `STAFF_PROMOTER`, or `PROMOTER`
+
+#### Path parameters
+
+<ParamField path="id" type="number" required>Numeric row ID.</ParamField>
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/venues/rows/25 \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+### **POST** /api/venues/rows
+
+Creates a new row within a zone.
+
+**Required role:** `PAYPAC` only
+
+#### Request body
+
+<ParamField body="name" type="string" required>
+  Row label (e.g., `"A"`, `"VIP-1"`). Minimum 1 character.
+</ParamField>
+
+<ParamField body="zone_id" type="number" required>
+  ID of the parent zone.
+</ParamField>
+
+#### Response `201`
+
+Returns the created row object.
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://api.paypac.com.co/api/venues/rows \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{"name": "A", "zone_id": 10}'
+```
+
+</CodeGroup>
+
+---
+
+### **PUT** /api/venues/rows/:id
+
+Updates a row's name.
+
+**Required role:** `PAYPAC` only
+
+#### Path parameters
+
+<ParamField path="id" type="number" required>Numeric row ID.</ParamField>
+
+#### Request body
+
+<ParamField body="name" type="string" required>
+  Updated row label.
+</ParamField>
+
+<CodeGroup>
+
+```bash cURL
+curl --request PUT \
+  --url https://api.paypac.com.co/api/venues/rows/25 \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{"name": "AA"}'
+```
+
+</CodeGroup>
+
+---
+
+### **DELETE** /api/venues/rows/:id
+
+Deletes a row. The row must have no seats.
+
+**Required role:** `PAYPAC` only
+
+#### Path parameters
+
+<ParamField path="id" type="number" required>Numeric row ID.</ParamField>
+
+<CodeGroup>
+
+```bash cURL
+curl --request DELETE \
+  --url https://api.paypac.com.co/api/venues/rows/25 \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## Seats
+
+Seats are individual numbered positions within a row (e.g., `"A1"`, `"H23"`). Each seat has a permanent `status` (`ACTIVE` or `BLOCKED_MAINTENANCE`) and per-event status records managed via [Seat Status](#seat-status).
+
+### **GET** /api/venues/seats/by-row/:row_id
+
+Returns all seats in a row.
+
+**Required role:** `PAYPAC`, `ORGANIZER`, `STAFF`, `STAFF_PROMOTER`, or `PROMOTER`
+
+#### Path parameters
+
+<ParamField path="row_id" type="number" required>Numeric row ID.</ParamField>
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/venues/seats/by-row/25 \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+#### Response `200`
+
+<ResponseField name="seats" type="object[]">
+  <Expandable title="seat properties">
+    <ResponseField name="id" type="number">Seat ID.</ResponseField>
+    <ResponseField name="row_id" type="number">Parent row ID.</ResponseField>
+    <ResponseField name="seat_number" type="string">Seat label (e.g., `"A1"`).</ResponseField>
+    <ResponseField name="status" type="string">Physical status: `ACTIVE` or `BLOCKED_MAINTENANCE`.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+### **GET** /api/venues/seats/by-place/:place_id
+
+Returns all seats in a venue, optionally filtered by physical status.
+
+**Required role:** `PAYPAC` or `ORGANIZER`
+
+#### Path parameters
+
+<ParamField path="place_id" type="number" required>Numeric venue ID.</ParamField>
+
+#### Query parameters
+
+<ParamField query="status" type="string">
+  Filter by physical seat status. `ACTIVE` or `BLOCKED_MAINTENANCE`.
+</ParamField>
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url 'https://api.paypac.com.co/api/venues/seats/by-place/3?status=ACTIVE' \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+### **GET** /api/venues/seats/:id
+
+Returns a single seat by ID, including its full hierarchy (row → zone → venue).
+
+**Required role:** `PAYPAC`, `ORGANIZER`, `STAFF`, `STAFF_PROMOTER`, or `PROMOTER`
+
+#### Path parameters
+
+<ParamField path="id" type="number" required>Numeric seat ID.</ParamField>
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/venues/seats/150 \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+### **POST** /api/venues/seats
+
+Creates a single seat within a row. The combination of `row_id` + `seat_number` must be unique.
+
+**Required role:** `PAYPAC` only
+
+#### Request body
+
+<ParamField body="seat_number" type="string" required>
+  Seat label (e.g., `"A1"`, `"Y15"`). Must be unique within the row.
+</ParamField>
+
+<ParamField body="row_id" type="number" required>
+  ID of the parent row.
+</ParamField>
+
+#### Response `201`
+
+Returns the created seat object.
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://api.paypac.com.co/api/venues/seats \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{"seat_number": "A1", "row_id": 25}'
+```
+
+</CodeGroup>
+
+---
+
+### **POST** /api/venues/seats/bulk
+
+Creates multiple seats in a single row in one request. Maximum 200 seats per call.
+
+**Required role:** `PAYPAC` only
+
+#### Request body
+
+<ParamField body="row_id" type="number" required>
+  ID of the row to add seats to.
+</ParamField>
+
+<ParamField body="seat_numbers" type="string[]" required>
+  Array of seat labels to create (e.g., `["A1", "A2", "A3"]`). Minimum 1, maximum 200 items. All labels must be unique within the row.
+</ParamField>
+
+#### Response `201`
+
+<ResponseField name="created" type="number">Number of seats successfully created.</ResponseField>
+<ResponseField name="seats" type="object[]">Array of the created seat objects.</ResponseField>
+
+#### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Duplicate seat number within the row, or batch exceeds 200 seats. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PAYPAC` role. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://api.paypac.com.co/api/venues/seats/bulk \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "row_id": 25,
+    "seat_numbers": ["A1", "A2", "A3", "A4", "A5"]
+  }'
+```
+
+</CodeGroup>
+
+---
+
+### **PATCH** /api/venues/seats/:id/status
+
+Updates the permanent physical status of a seat. Use `BLOCKED_MAINTENANCE` to take a seat out of service regardless of any event.
+
+**Required role:** `PAYPAC` only
+
+#### Path parameters
+
+<ParamField path="id" type="number" required>Numeric seat ID.</ParamField>
+
+#### Request body
+
+<ParamField body="status" type="string" required>
+  New physical status. `ACTIVE` or `BLOCKED_MAINTENANCE`.
+</ParamField>
+
+#### Response `200`
+
+Returns the updated seat object.
+
+<CodeGroup>
+
+```bash cURL
+curl --request PATCH \
+  --url https://api.paypac.com.co/api/venues/seats/150/status \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{"status": "BLOCKED_MAINTENANCE"}'
+```
+
+</CodeGroup>
+
+---
+
+### **DELETE** /api/venues/seats/:id
+
+Permanently deletes a seat.
+
+**Required role:** `PAYPAC` only
+
+#### Path parameters
+
+<ParamField path="id" type="number" required>Numeric seat ID.</ParamField>
+
+<CodeGroup>
+
+```bash cURL
+curl --request DELETE \
+  --url https://api.paypac.com.co/api/venues/seats/150 \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## Seat Status
+
+Per-event seat status tracks the real-time state of each seat for a specific event. This is separate from the physical seat status and must be initialized before an event goes on sale.
+
+| Status | Meaning |
+|--------|---------|
+| `AVAILABLE` | Seat is open for purchase. |
+| `HELD` | Seat is in a customer's cart. Expires after 10 minutes if not purchased. |
+| `SOLD` | Seat has been purchased. |
+| `BLOCKED` | Seat is reserved for courtesy, press, or production. |
+
+---
+
+### **POST** /api/venues/seat-status/initialize
+
+Initializes `EventSeatStatus` records for every `ACTIVE` seat in a venue for a given event. All seats start as `AVAILABLE`. Call this when approving a numbered-seat event.
+
+**Required role:** `PAYPAC` or `ORGANIZER`
+
+#### Request body
+
+<ParamField body="place_id" type="number" required>
+  ID of the venue whose seats to initialize.
+</ParamField>
+
+<ParamField body="event_id" type="number" required>
+  ID of the event to create seat status records for.
+</ParamField>
+
+#### Response `201`
+
+<ResponseField name="initialized" type="number">Number of seat status records created.</ResponseField>
+<ResponseField name="event_id" type="number">Event ID.</ResponseField>
+<ResponseField name="place_id" type="number">Venue ID.</ResponseField>
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://api.paypac.com.co/api/venues/seat-status/initialize \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{"place_id": 3, "event_id": 101}'
+```
+
+</CodeGroup>
+
+---
+
+### **POST** /api/venues/seat-status/hold
+
+Moves a seat into `HELD` status for the current user's cart. The hold expires automatically after 10 minutes (`held_until` timestamp). If the seat is already `HELD` or `SOLD`, the request fails.
+
+**Required role:** Any authenticated user (including `CUSTOMER`)
+
+#### Request body
+
+<ParamField body="seat_id" type="number" required>
+  ID of the seat to hold.
+</ParamField>
+
+<ParamField body="event_id" type="number" required>
+  ID of the event.
+</ParamField>
+
+#### Response `200`
+
+<ResponseField name="seat_id" type="number">Seat ID.</ResponseField>
+<ResponseField name="event_id" type="number">Event ID.</ResponseField>
+<ResponseField name="status" type="string">`HELD`.</ResponseField>
+<ResponseField name="held_until" type="string">ISO 8601 timestamp when the hold expires.</ResponseField>
+
+#### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Seat is already `HELD` or `SOLD`. |
+| `401`  | Missing or invalid Bearer token. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://api.paypac.com.co/api/venues/seat-status/hold \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{"seat_id": 150, "event_id": 101}'
+```
+
+</CodeGroup>
+
+---
+
+### **POST** /api/venues/seat-status/release
+
+Releases a `HELD` seat back to `AVAILABLE`. Use when a customer removes a seat from their cart.
+
+**Required role:** Any authenticated user
+
+#### Request body
+
+<ParamField body="seat_id" type="number" required>
+  ID of the seat to release.
+</ParamField>
+
+<ParamField body="event_id" type="number" required>
+  ID of the event.
+</ParamField>
+
+#### Response `200`
+
+<ResponseField name="seat_id" type="number">Seat ID.</ResponseField>
+<ResponseField name="event_id" type="number">Event ID.</ResponseField>
+<ResponseField name="status" type="string">`AVAILABLE`.</ResponseField>
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://api.paypac.com.co/api/venues/seat-status/release \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{"seat_id": 150, "event_id": 101}'
+```
+
+</CodeGroup>
+
+---
+
+### **POST** /api/venues/seat-status/block
+
+Marks a seat as `BLOCKED` for a specific event (e.g., for courtesy guests, press, or production). Blocked seats are not available for purchase.
+
+**Required role:** `PAYPAC` or `ORGANIZER`
+
+#### Request body
+
+<ParamField body="seat_id" type="number" required>
+  ID of the seat to block.
+</ParamField>
+
+<ParamField body="event_id" type="number" required>
+  ID of the event.
+</ParamField>
+
+#### Response `200`
+
+<ResponseField name="seat_id" type="number">Seat ID.</ResponseField>
+<ResponseField name="event_id" type="number">Event ID.</ResponseField>
+<ResponseField name="status" type="string">`BLOCKED`.</ResponseField>
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://api.paypac.com.co/api/venues/seat-status/block \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{"seat_id": 150, "event_id": 101}'
+```
+
+</CodeGroup>
+
+---
+
+### **GET** /api/venues/seat-status/:event_id/map
+
+Returns a flat map of `{ seat_id: status }` for every seat in the event's venue. Used by the interactive seating chart to render seat availability in real time.
+
+**Required role:** Any authenticated user (including `CUSTOMER`)
+
+#### Path parameters
+
+<ParamField path="event_id" type="number" required>
+  Numeric event ID.
+</ParamField>
+
+#### Response `200`
+
+<ResponseField name="event_id" type="number">Event ID.</ResponseField>
+<ResponseField name="map" type="object">
+  A flat key-value map where each key is a `seat_id` (as a string) and the value is the current `SeatEventStatus`: `AVAILABLE`, `HELD`, `SOLD`, or `BLOCKED`.
+
+  Example: `{ "150": "AVAILABLE", "151": "HELD", "152": "SOLD" }`
+</ResponseField>
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/venues/seat-status/101/map \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+### **GET** /api/venues/seat-status/:event_id/counts
+
+Returns a count of seats broken down by status for a specific event.
+
+**Required role:** `PAYPAC` or `ORGANIZER`
+
+#### Path parameters
+
+<ParamField path="event_id" type="number" required>
+  Numeric event ID.
+</ParamField>
+
+#### Response `200`
+
+<ResponseField name="event_id" type="number">Event ID.</ResponseField>
+<ResponseField name="AVAILABLE" type="number">Number of available seats.</ResponseField>
+<ResponseField name="HELD" type="number">Number of seats currently in carts.</ResponseField>
+<ResponseField name="SOLD" type="number">Number of sold seats.</ResponseField>
+<ResponseField name="BLOCKED" type="number">Number of blocked seats.</ResponseField>
+<ResponseField name="total" type="number">Total seat count for the event.</ResponseField>
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/venues/seat-status/101/counts \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+### **POST** /api/venues/seat-status/:event_id/release-expired
+
+Scans all `HELD` seats for the event and releases those whose `held_until` timestamp has passed. Intended to be called by a scheduled job or by `PAYPAC` admins to clear expired cart reservations.
+
+**Required role:** `PAYPAC` only
+
+#### Path parameters
+
+<ParamField path="event_id" type="number" required>
+  Numeric event ID.
+</ParamField>
+
+#### Response `200`
+
+<ResponseField name="released" type="number">Number of expired holds that were released.</ResponseField>
+<ResponseField name="event_id" type="number">Event ID.</ResponseField>
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://api.paypac.com.co/api/venues/seat-status/101/release-expired \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>

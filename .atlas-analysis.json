@@ -1,23 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "name": "PayPac Backend API",
+  "projectType": "api-service",
+  "projectName": "PayPac Backend API",
+  "projectDescription": "A comprehensive event ticketing and payment platform backend that manages events, tickets, invoices, transactions, and promoters with role-based access control.",
   "theme": "luma",
-  "colors": {
-    "primary": "#6366F1",
-    "light": "#EEF2FF",
-    "dark": "#312E81"
-  },
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/wschub/paypac-backend-mono-26"
-    }
-  },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/wschub/paypac-backend-mono-26"
-    }
-  },
+  "primaryColor": "#6366F1",
+  "lightColor": "#EEF2FF",
+  "darkColor": "#312E81",
   "navigation": {
     "tabs": [
       {
@@ -107,5 +95,41 @@
         ]
       }
     ]
-  }
+  },
+  "keyFeatures": [
+    "Role-based access control with 6 roles: PAYPAC, ORGANIZER, STAFF, STAFF_PROMOTER, PROMOTER, CUSTOMER",
+    "Full event lifecycle management from creation to finalization",
+    "Ticket issuance, transfer, validation, and TOTP-based QR code support",
+    "Invoice and payment processing via Wompi payment gateway",
+    "Promoter system with reward rules and balance tracking",
+    "Real-time WebSocket notifications and ticket status updates",
+    "Background jobs for email queues, event finalization, and ticket transfer expiry",
+    "Numbered venue seating with zones, rows, and seat-level status management",
+    "Firebase Authentication integration with JWT",
+    "Email notifications via Brevo and SMS via Onurix"
+  ],
+  "publicApiSurface": [
+    "POST /api/auth/register",
+    "GET /api/auth/me",
+    "GET /api/users",
+    "GET /api/users/me/profile",
+    "POST /api/events",
+    "GET /api/events",
+    "GET /api/events/:id",
+    "PATCH /api/events/:id/status",
+    "GET /api/venues",
+    "POST /api/invoices",
+    "GET /api/invoices/my-invoices",
+    "POST /api/transactions/process",
+    "POST /api/transactions/signature",
+    "GET /api/tickets/my-tickets",
+    "POST /api/tickets/:id/transfer",
+    "POST /api/tickets/:id/validate",
+    "GET /api/companies",
+    "GET /api/promoter-codes",
+    "GET /api/dashboard",
+    "GET /api/reports",
+    "POST /api/webhooks/wompi",
+    "GET /api/liquidations"
+  ]
 }

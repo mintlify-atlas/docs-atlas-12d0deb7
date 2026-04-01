@@ -1,0 +1,194 @@
+---
+title: "Dashboard & Reports"
+description: "Analytics dashboards and financial reports for PAYPAC admins and organizers"
+---
+
+PayPac provides two sets of analytics endpoints: real-time **dashboards** for quick KPI snapshots, and detailed **reports** for financial analysis and event intelligence.
+
+## Dashboards
+
+### PAYPAC dashboard
+
+**GET** `/api/dashboard/paypac`
+
+Returns a platform-wide snapshot for the current month. Requires **PAYPAC** role.
+
+```bash
+curl https://api.paypac.com.co/api/dashboard/paypac \
+  -H "Authorization: Bearer <token>"
+```
+
+Typical response includes:
+- Total revenue and transaction counts for the current month
+- Active events count
+- New user registrations
+- Top-performing events by revenue
+
+### Organizer dashboard
+
+**GET** `/api/dashboard/organizer`
+
+Returns a snapshot filtered to the authenticated organizer's company and events. Requires **ORGANIZER** role.
+
+```bash
+curl https://api.paypac.com.co/api/dashboard/organizer \
+  -H "Authorization: Bearer <token>"
+```
+
+Typical response includes:
+- Revenue and ticket sales for the organizer's active events
+- Upcoming events summary
+- Staff and promoter counts
+
+### Organizer app dashboard
+
+**GET** `/api/dashboard/organizer/app`
+
+A streamlined dashboard optimized for the mobile organizer app. Requires **ORGANIZER** role.
+
+```bash
+curl https://api.paypac.com.co/api/dashboard/organizer/app \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## Reports
+
+All report endpoints accept a `range` query parameter to scope the time window.
+
+<ParamField query="range" type="string">
+  Time range: `today`, `month`, `quarter`, `year`, or `custom`
+</ParamField>
+
+<ParamField query="from" type="string">
+  ISO 8601 start date (required when `range=custom`)
+</ParamField>
+
+<ParamField query="to" type="string">
+  ISO 8601 end date (required when `range=custom`)
+</ParamField>
+
+---
+
+### PAYPAC reports
+
+The following reports require the **PAYPAC** role.
+
+#### Financial report
+
+**GET** `/api/reports/paypac/financiero`
+
+Platform-wide financial summary: gross revenue, PayPac commissions, promoter commissions, refunds, and net revenue broken down by period.
+
+```bash
+curl "https://api.paypac.com.co/api/reports/paypac/financiero?range=month" \
+  -H "Authorization: Bearer <token>"
+```
+
+#### Organizers report
+
+**GET** `/api/reports/paypac/organizadores`
+
+Performance metrics per organizer company: events created, tickets sold, revenue generated.
+
+```bash
+curl "https://api.paypac.com.co/api/reports/paypac/organizadores?range=quarter" \
+  -H "Authorization: Bearer <token>"
+```
+
+#### Events portfolio report
+
+**GET** `/api/reports/paypac/eventos`
+
+Overview of all events on the platform with status, ticket counts, and revenue.
+
+```bash
+curl "https://api.paypac.com.co/api/reports/paypac/eventos?range=year" \
+  -H "Authorization: Bearer <token>"
+```
+
+#### Expansion report
+
+**GET** `/api/reports/paypac/expansion`
+
+Geographic and category-based growth metrics — new markets, user distribution by city, and category trends.
+
+```bash
+curl https://api.paypac.com.co/api/reports/paypac/expansion \
+  -H "Authorization: Bearer <token>"
+```
+
+#### Risk report
+
+**GET** `/api/reports/paypac/riesgo`
+
+Risk indicators: failed transactions, refund rates, canceled events, and suspicious activity signals.
+
+```bash
+curl "https://api.paypac.com.co/api/reports/paypac/riesgo?range=month" \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+### Organizer reports
+
+The following reports are available to **ORGANIZER** and **PAYPAC** roles.
+
+#### Liquidation report
+
+**GET** `/api/reports/organizer/liquidacion`
+
+Detailed liquidation breakdown for a specific event: gross amount, PayPac commission, promoter commissions, refunds, and net payout.
+
+<ParamField query="event_id" type="number">
+  Filter by specific event ID
+</ParamField>
+
+```bash
+curl "https://api.paypac.com.co/api/reports/organizer/liquidacion?event_id=12&range=month" \
+  -H "Authorization: Bearer <token>"
+```
+
+#### Sales report
+
+**GET** `/api/reports/organizer/ventas`
+
+Time-series sales data for an event — useful for tracking sales velocity.
+
+<ParamField query="event_id" type="number">
+  Event ID to report on
+</ParamField>
+
+<ParamField query="granularity" type="string">
+  Data granularity: `day` or `hour`
+</ParamField>
+
+<ParamField query="date" type="string">
+  Specific date to drill into (e.g. `2026-03-14`) — used with `hour` granularity
+</ParamField>
+
+```bash
+curl "https://api.paypac.com.co/api/reports/organizer/ventas?event_id=12&granularity=day&range=month" \
+  -H "Authorization: Bearer <token>"
+```
+
+#### Intelligence report
+
+**GET** `/api/reports/organizer/inteligencia`
+
+Audience intelligence for an event: buyer demographics, geographic origin, repeat purchase rates, and locality popularity.
+
+<ParamField query="event_id" type="number" required>
+  Event ID to analyze
+</ParamField>
+
+```bash
+curl "https://api.paypac.com.co/api/reports/organizer/inteligencia?event_id=12" \
+  -H "Authorization: Bearer <token>"
+```
+
+<Tip>
+  For payout tracking, use [Liquidations](/api/liquidations) alongside the liquidation report to see per-event net amounts and payment status.
+</Tip>

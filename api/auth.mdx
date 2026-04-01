@@ -1,0 +1,312 @@
+---
+title: "Authentication"
+description: "Register users and retrieve authenticated profiles. Authentication is handled by Firebase on the client; the backend validates Firebase ID tokens via a Bearer header."
+---
+
+<Info>
+  Authentication uses Firebase ID tokens. The client signs in via Firebase and passes the resulting ID token as `Authorization: Bearer <token>` on every protected request. The backend verifies the token and resolves the corresponding database user.
+</Info>
+
+---
+
+## **POST** /api/auth/register
+
+Register a new user account. This endpoint is public — no authentication required. Intended for customer self-registration.
+
+<Info>Admin-created users (staff, promoters, organizers) should be created via [POST /api/auth/new-user](#post-apiauthcreate-user) instead.</Info>
+
+### Request body
+
+<ParamField body="name" type="string" required>
+  First name. Minimum 2 characters.
+</ParamField>
+
+<ParamField body="last_name" type="string" required>
+  Last name. Minimum 2 characters.
+</ParamField>
+
+<ParamField body="email" type="string" required>
+  Valid email address. Must be unique across all users.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  Password. Minimum 6 characters. Used to create the Firebase account.
+</ParamField>
+
+<ParamField body="phone_number" type="string" required>
+  Phone number. Minimum 10 digits.
+</ParamField>
+
+<ParamField body="role" type="string" required>
+  User role. One of: `PAYPAC`, `ORGANIZER`, `STAFF`, `STAFF_PROMOTER`, `PROMOTER`, `CUSTOMER`.
+</ParamField>
+
+<ParamField body="company_id" type="number">
+  Optional company association. Positive integer ID. Not required for `CUSTOMER` registrations.
+</ParamField>
+
+<ParamField body="num_doc" type="string">
+  Identity document number (optional).
+</ParamField>
+
+<ParamField body="type_doc" type="number">
+  Document type identifier (optional). Corresponds to `DocType` enum: `CC`, `CE`, `PA`, `TI`, `NIT`, `SSN`.
+</ParamField>
+
+### Response `201`
+
+<ResponseField name="message" type="string">
+  Confirmation message: `"Usuario creado exitosamente"`.
+</ResponseField>
+
+<ResponseField name="user" type="object">
+  The created user object.
+
+  <Expandable title="user properties">
+    <ResponseField name="id" type="number">Auto-incremented user ID.</ResponseField>
+    <ResponseField name="email" type="string">User email address.</ResponseField>
+    <ResponseField name="name" type="string">First name.</ResponseField>
+    <ResponseField name="last_name" type="string">Last name.</ResponseField>
+    <ResponseField name="role" type="string">Assigned role.</ResponseField>
+    <ResponseField name="company_id" type="number">Associated company ID, or `null`.</ResponseField>
+    <ResponseField name="firebase_uid" type="string">Firebase UID created during registration.</ResponseField>
+    <ResponseField name="createdAt" type="string">ISO 8601 creation timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Validation error or email already in use. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://api.paypac.com.co/api/auth/register \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "name": "María",
+    "last_name": "García",
+    "email": "maria@example.com",
+    "password": "secret123",
+    "phone_number": "3001234567",
+    "role": "CUSTOMER"
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## **POST** /api/auth/new-user
+
+Admin-created user registration. Requires a valid Bearer token from a `PAYPAC` or `ORGANIZER` account. The new user is automatically associated with the authenticated admin's company.
+
+**Required role:** `PAYPAC` or `ORGANIZER`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Request body
+
+Same fields as [POST /api/auth/register](#post-apiauthregister). When called by an `ORGANIZER`, the `company_id` defaults to the organizer's own company if not explicitly provided.
+
+<ParamField body="name" type="string" required>
+  First name. Minimum 2 characters.
+</ParamField>
+
+<ParamField body="last_name" type="string" required>
+  Last name. Minimum 2 characters.
+</ParamField>
+
+<ParamField body="email" type="string" required>
+  Valid email address. Must be unique.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  Password. Minimum 6 characters.
+</ParamField>
+
+<ParamField body="phone_number" type="string" required>
+  Phone number. Minimum 10 digits.
+</ParamField>
+
+<ParamField body="role" type="string" required>
+  Role to assign. One of: `PAYPAC`, `ORGANIZER`, `STAFF`, `STAFF_PROMOTER`, `PROMOTER`, `CUSTOMER`.
+</ParamField>
+
+<ParamField body="company_id" type="number">
+  Company to associate the new user with. Defaults to the authenticated admin's company.
+</ParamField>
+
+<ParamField body="num_doc" type="string">
+  Identity document number (optional).
+</ParamField>
+
+<ParamField body="type_doc" type="number">
+  Document type identifier (optional).
+</ParamField>
+
+### Response `201`
+
+Same structure as [POST /api/auth/register](#post-apiauthregister).
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Validation error or email already in use. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PAYPAC` or `ORGANIZER` role. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://api.paypac.com.co/api/auth/new-user \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "name": "Carlos",
+    "last_name": "López",
+    "email": "carlos.staff@example.com",
+    "password": "secret456",
+    "phone_number": "3109876543",
+    "role": "STAFF",
+    "company_id": 5
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/auth/me
+
+Returns the profile of the currently authenticated user. Use this to verify a token and retrieve the resolved database user without performing a login call.
+
+**Required role:** Any authenticated user
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="id" type="number">
+  Internal database user ID.
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  User email address.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  First name.
+</ResponseField>
+
+<ResponseField name="last_name" type="string">
+  Last name.
+</ResponseField>
+
+<ResponseField name="role" type="string">
+  User role: `PAYPAC`, `ORGANIZER`, `STAFF`, `STAFF_PROMOTER`, `PROMOTER`, or `CUSTOMER`.
+</ResponseField>
+
+<ResponseField name="company_id" type="number">
+  Associated company ID, or `null` if the user has no company.
+</ResponseField>
+
+<ResponseField name="firebase_uid" type="string">
+  Firebase UID linked to this account.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `500`  | Internal server error. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/auth/me \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/auth/users
+
+Returns a list of all users in the system. Supports optional filtering by role, company, and status.
+
+**Required role:** `PAYPAC` only
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Query parameters
+
+<ParamField query="role" type="string">
+  Filter by role. One of: `PAYPAC`, `ORGANIZER`, `STAFF`, `STAFF_PROMOTER`, `PROMOTER`, `CUSTOMER`.
+</ParamField>
+
+<ParamField query="company_id" type="string">
+  Filter by company ID (numeric string).
+</ParamField>
+
+<ParamField query="status" type="string">
+  Filter by account status. `0` = inactive, `1` = active.
+</ParamField>
+
+### Response `200`
+
+Returns an array of user objects.
+
+<ResponseField name="users" type="object[]">
+  List of user records.
+
+  <Expandable title="user properties">
+    <ResponseField name="id" type="number">User ID.</ResponseField>
+    <ResponseField name="email" type="string">Email address.</ResponseField>
+    <ResponseField name="name" type="string">First name.</ResponseField>
+    <ResponseField name="last_name" type="string">Last name.</ResponseField>
+    <ResponseField name="role" type="string">User role.</ResponseField>
+    <ResponseField name="phone_number" type="string">Phone number.</ResponseField>
+    <ResponseField name="company_id" type="number">Associated company ID, or `null`.</ResponseField>
+    <ResponseField name="status" type="number">`0` = inactive, `1` = active.</ResponseField>
+    <ResponseField name="createdAt" type="string">ISO 8601 creation timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Query validation error. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PAYPAC` role. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url 'https://api.paypac.com.co/api/auth/users?role=ORGANIZER&status=1' \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>

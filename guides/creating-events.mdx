@@ -1,0 +1,213 @@
+---
+title: "Creating events"
+description: "Step-by-step guide to creating and publishing an event on PayPac"
+---
+
+## Overview
+
+Creating an event requires the `ORGANIZER` or `PAYPAC` role. A new event always starts in `CREATED` status and must be reviewed and approved by a `PAYPAC` administrator before it becomes visible to customers.
+
+<Note>
+  Once an event is approved, only `PAYPAC` can make further changes to it.
+</Note>
+
+## Event creation flow
+
+<Steps>
+  <Step title="Create the event">
+    Send a `POST /api/events` request with the event details. The `organizer_id` is set automatically from the authenticated user.
+
+    <CodeGroup>
+    ```bash curl
+    curl -X POST https://api.paypac.com.co/api/events \
+      -H "Authorization: Bearer <token>" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "name": "Festival Electrónico Bogotá 2026",
+        "short_description": "La noche más grande del año vuelve a Bogotá.",
+        "description": "Únete a tres escenarios simultáneos con los mejores artistas internacionales de música electrónica. Puertas abren a las 8 PM.",
+        "date_event": "2026-09-12T20:00:00.000Z",
+        "place_address": "Parque Simón Bolívar, Bogotá",
+        "city": "Bogotá",
+        "country": "Colombia",
+        "currency": "COP",
+        "event_type": "PUBLICO",
+        "type_venue": "SIN_NUMERAR",
+        "date_type": "SINGLE",
+        "category_id": 3,
+        "num_max_tickets": 5000,
+        "apply_dcto": true,
+        "allow_external_promoters": true,
+        "sales_channel": "app",
+        "commission_to_charge": 10,
+        "commission_to_promoter": 5
+      }'
+    ```
+    </CodeGroup>
+
+    On success the API returns `201` with the created event object including its `id`.
+
+    <Tip>
+      Set `commission_to_charge` to the percentage PayPac charges per ticket sale (e.g. `10` = 10 %). Set `commission_to_promoter` to the default cut promoters earn on each sale they drive.
+    </Tip>
+  </Step>
+
+  <Step title="Add localities">
+    A locality is a seating area or section within the event (e.g. General, VIP). Create one or more localities with `POST /api/events/:eventId/localities`.
+
+    <CodeGroup>
+    ```bash curl — General admission
+    curl -X POST https://api.paypac.com.co/api/events/42/localities \
+      -H "Authorization: Bearer <token>" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "name_locality": "General",
+        "description": "Acceso general al festival",
+        "colors": "#6366f1",
+        "num_max_tickets": 3000
+      }'
+    ```
+
+    ```bash curl — VIP
+    curl -X POST https://api.paypac.com.co/api/events/42/localities \
+      -H "Authorization: Bearer <token>" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "name_locality": "VIP",
+        "description": "Zona VIP con barra abierta",
+        "colors": "#f59e0b",
+        "num_max_tickets": 500
+      }'
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Add pricing stages">
+    Each locality can have multiple pricing stages that are active during different time windows (e.g. early-bird, regular, last-minute). Create stages with `POST /api/localities/:localityId/stages`.
+
+    <CodeGroup>
+    ```bash curl — Early-bird stage
+    curl -X POST https://api.paypac.com.co/api/localities/101/stages \
+      -H "Authorization: Bearer <token>" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "stage_name": "Preventa",
+        "date_start": "2026-06-01T00:00:00.000Z",
+        "date_end": "2026-07-31T23:59:59.000Z",
+        "price_ticket": 80000
+      }'
+    ```
+
+    ```bash curl — Regular stage
+    curl -X POST https://api.paypac.com.co/api/localities/101/stages \
+      -H "Authorization: Bearer <token>" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "stage_name": "Precio regular",
+        "date_start": "2026-08-01T00:00:00.000Z",
+        "date_end": "2026-09-11T23:59:59.000Z",
+        "price_ticket": 120000
+      }'
+    ```
+    </CodeGroup>
+
+    <Note>
+      Only the stage whose `date_start`/`date_end` window includes the current time is considered active. The API exposes the active stage price as `price_from` on each event in listing responses.
+    </Note>
+  </Step>
+
+  <Step title="Set up a numbered venue (optional)">
+    For events with assigned seating, create the venue first via `POST /api/venues` (requires `PAYPAC` role), then reference it in the event using `numbered_place_id`.
+
+    <CodeGroup>
+    ```bash curl — Create venue
+    curl -X POST https://api.paypac.com.co/api/venues \
+      -H "Authorization: Bearer <token>" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "name": "Teatro Metropol",
+        "city": "Bogotá",
+        "country": "Colombia",
+        "capacity": 1200
+      }'
+    ```
+    </CodeGroup>
+
+    After creating the venue, retrieve the full seat layout with `GET /api/venues/:id/layout` to inspect zones, rows, and seats. Then set `type_venue: "NUMERADO"` and `numbered_place_id` when creating the event.
+
+    <Warning>
+      Venue creation and management is restricted to the `PAYPAC` role. Contact PayPac support to provision a new venue.
+    </Warning>
+  </Step>
+
+  <Step title="Submit for approval">
+    Once localities and stages are configured, the event is ready for review. A `PAYPAC` administrator changes the status via `PATCH /api/events/:id/status`.
+
+    <CodeGroup>
+    ```bash curl — Approve event
+    curl -X PATCH https://api.paypac.com.co/api/events/42/status \
+      -H "Authorization: Bearer <token>" \
+      -H "Content-Type: application/json" \
+      -d '{ "status": "APPROVED" }'
+    ```
+    </CodeGroup>
+  </Step>
+</Steps>
+
+## Event fields reference
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Public event name (min 3 chars) |
+| `short_description` | string | Short summary shown in listings (min 10 chars) |
+| `description` | string | Full event description (min 20 chars) |
+| `date_event` | ISO 8601 | Event start date and time |
+| `place_address` | string | Physical address |
+| `city` / `country` | string | Location |
+| `currency` | string | Ticket currency, default `COP` |
+| `event_type` | `PUBLICO` \| `PRIVADO` | Public events are visible to all customers; private events require a direct link |
+| `type_venue` | `SIN_NUMERAR` \| `NUMERADO` | General-admission or numbered seating |
+| `date_type` | `SINGLE` \| `MULTIPLE` \| `RANGE_DATE` \| `RANGE_DATE_EXCEPT` \| `EXPLICIT_DATES` | How event dates are structured |
+| `apply_dcto` | boolean | Enable discount codes for this event |
+| `allow_external_promoters` | boolean | Allow promoters outside your network to sell tickets |
+| `allow_paypac_promotion` | boolean | Allow PayPac's own promotional campaigns |
+| `sales_channel` | string | Where tickets are sold (e.g. `app`, `web`) |
+| `commission_to_charge` | number (0–100) | Platform commission percentage charged to the buyer |
+| `commission_to_promoter` | number (0–100) | Default promoter commission percentage |
+| `numbered_place_id` | number | ID of the venue for numbered-seating events |
+
+## Event status lifecycle
+
+Events move through the following statuses. Only `PAYPAC` can change status.
+
+| From | Allowed transitions |
+|---|---|
+| `CREATED` | `APPROVED`, `CANCELED` |
+| `APPROVED` | `SCHEDULED`, `CANCELED` |
+| `SCHEDULED` | `ACTIVE`, `RE_SCHEDULED`, `CANCELED` |
+| `ACTIVE` | `FINALIZED`, `CANCELED` |
+| `RE_SCHEDULED` | `SCHEDULED`, `CANCELED` |
+| `FINALIZED` | — |
+| `CANCELED` | — |
+
+<Note>
+  Transitioning to `FINALIZED` automatically triggers the liquidation process that calculates promoter commissions for the event.
+</Note>
+
+## Adding discounts
+
+If `apply_dcto` is `true`, you can attach discount rules to the event. Discount codes entered at checkout are validated against these rules.
+
+<CodeGroup>
+```bash curl
+curl -X POST https://api.paypac.com.co/api/events/42/discounts \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "code": "EARLY20",
+    "discount_percentage": 20,
+    "max_uses": 100,
+    "valid_until": "2026-07-31T23:59:59.000Z"
+  }'
+```
+</CodeGroup>

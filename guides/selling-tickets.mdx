@@ -1,0 +1,196 @@
+---
+title: "Selling tickets"
+description: "How to process ticket purchases from invoice creation to ticket issuance"
+---
+
+## Overview
+
+The purchase flow is invoice-driven. A buyer creates an invoice that reserves the tickets, completes payment through Wompi, and the webhook confirmation causes the invoice to transition to `PAID` and the tickets to be issued automatically.
+
+<Note>
+  Tickets are only issued after the payment webhook confirms a successful transaction. Never rely on the invoice being created to assume tickets have been issued.
+</Note>
+
+## Purchase flow
+
+<Steps>
+  <Step title="Create an invoice">
+    Any authenticated user can create an invoice with `POST /api/invoices`. The request specifies which stages and localities to purchase and, optionally, a discount code.
+
+    <CodeGroup>
+    ```bash curl — Basic purchase
+    curl -X POST https://api.paypac.com.co/api/invoices \
+      -H "Authorization: Bearer <token>" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "event_id": 42,
+        "items": [
+          {
+            "stage_id": 201,
+            "locality_id": 101,
+            "qty_tickets": 2
+          }
+        ]
+      }'
+    ```
+
+    ```bash curl — With discount code
+    curl -X POST https://api.paypac.com.co/api/invoices \
+      -H "Authorization: Bearer <token>" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "event_id": 42,
+        "items": [
+          {
+            "stage_id": 201,
+            "locality_id": 101,
+            "qty_tickets": 2
+          }
+        ],
+        "discount_code": "EARLY20"
+      }'
+    ```
+    </CodeGroup>
+
+    The response includes the invoice `id`, `num_invoice`, calculated `total_amount`, and `status: "PENDING"`.
+
+    <Tip>
+      Pre-validate a discount code before creating the invoice using `POST /api/discounts/validate` with `{ event_id, discount_name, quantity }`, or a promoter code using `GET /api/promoter-codes/validate/:code`, to give the buyer immediate feedback.
+    </Tip>
+  </Step>
+
+  <Step title="Generate a Wompi payment signature">
+    Before redirecting the user to Wompi, generate a payment signature.
+
+    <CodeGroup>
+    ```bash curl
+    curl -X POST https://api.paypac.com.co/api/transactions/signature \
+      -H "Authorization: Bearer <token>" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "invoice_id": 350,
+        "amount_in_cents": 240000,
+        "currency": "COP"
+      }'
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Process the transaction">
+    Submit payment details to complete the purchase.
+
+    <CodeGroup>
+    ```bash curl
+    curl -X POST https://api.paypac.com.co/api/transactions/process \
+      -H "Authorization: Bearer <token>" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "invoice_id": 350,
+        "payment_method_type": "CARD",
+        "token": "<wompi_card_token>",
+        "installments": 1
+      }'
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Webhook confirms payment and tickets are issued">
+    Wompi calls `PATCH /api/invoices/:id/status` when the transaction resolves. On a successful payment the invoice moves to `PAID` and tickets are created for each item in the invoice.
+
+    The buyer will receive a `TICKET_PURCHASE` email confirmation automatically.
+  </Step>
+</Steps>
+
+## Invoice response structure
+
+A successful `GET /api/invoices/:id` returns:
+
+```json
+{
+  "id": 350,
+  "num_invoice": "INV-2026-000350",
+  "status": "PAID",
+  "event_id": 42,
+  "total_amount": 240000,
+  "discount_code": "EARLY20",
+  "invoiceTickets": [
+    {
+      "id": 1001,
+      "locality_id": 101,
+      "stage_id": 201,
+      "status_ticket": "ACTIVE"
+    },
+    {
+      "id": 1002,
+      "locality_id": 101,
+      "stage_id": 201,
+      "status_ticket": "ACTIVE"
+    }
+  ]
+}
+```
+
+### Invoice statuses
+
+| Status | Meaning |
+|---|---|
+| `ISSUED` | Invoice created, awaiting payment |
+| `PROCESSING` | Payment is being processed |
+| `PENDING` | Awaiting payment confirmation |
+| `PAID` | Payment confirmed, tickets issued |
+| `REJECTED` | Payment rejected by the gateway |
+| `CANCELED` | Invoice canceled by the buyer or organizer |
+| `REFUNDED` | Invoice has been refunded |
+
+## Applying discount codes
+
+Include the `discount_code` field in the invoice creation body. The API validates the code at creation time — if invalid or expired, the request returns a `400` error.
+
+You can pre-validate a discount code before creating the invoice:
+
+<CodeGroup>
+```bash curl — Validate discount code
+curl -X POST https://api.paypac.com.co/api/discounts/validate \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"event_id": 42, "discount_name": "EARLY20", "quantity": 2}'
+```
+
+```bash curl — Validate promoter code
+curl -X GET https://api.paypac.com.co/api/promoter-codes/validate/JUAN2024 \
+  -H "Authorization: Bearer <token>"
+```
+</CodeGroup>
+
+## Checking invoice status
+
+<CodeGroup>
+```bash curl — Get invoice by ID
+curl -X GET https://api.paypac.com.co/api/invoices/350 \
+  -H "Authorization: Bearer <token>"
+```
+
+```bash curl — My purchases
+curl -X GET https://api.paypac.com.co/api/invoices/my-invoices \
+  -H "Authorization: Bearer <token>"
+```
+</CodeGroup>
+
+`GET /api/invoices/my-invoices` returns all invoices belonging to the authenticated user, regardless of status.
+
+Organizers can list all invoices for their event with `GET /api/events/:eventId/invoices` (requires `ORGANIZER` or `PAYPAC` role).
+
+## Canceling an invoice
+
+A buyer or administrator can cancel a `PENDING` invoice before payment is confirmed.
+
+<CodeGroup>
+```bash curl
+curl -X PATCH https://api.paypac.com.co/api/invoices/350/cancel \
+  -H "Authorization: Bearer <token>"
+```
+</CodeGroup>
+
+<Warning>
+  Canceling a `PAID` invoice does not automatically issue a refund. Refunds must be handled through Wompi and the organizer's reconciliation process.
+</Warning>

@@ -1,0 +1,453 @@
+---
+title: 'WebSockets'
+description: 'Real-time communication via Socket.IO for tickets and notifications'
+keywords: ['websocket', 'socket.io', 'real-time', 'tickets', 'notifications', 'events']
+---
+
+The PayPac backend runs a Socket.IO server on the same port as the REST API. Both share a single `http.Server` instance, so no additional port configuration is needed.
+
+## Connection
+
+Connect using the `socket.io-client` library. Pass your Firebase ID token in the `auth` object — the server rejects connections without a valid token.
+
+```javascript
+import { io } from 'socket.io-client';
+
+const socket = io('https://api.paypac.com.co', {
+  auth: {
+    token: '<firebase-id-token>',
+  },
+});
+
+socket.on('connect', () => {
+  console.log('Connected:', socket.id);
+});
+
+socket.on('connect_error', (err) => {
+  console.error('Connection error:', err.message);
+});
+```
+
+## Authentication
+
+Every Socket.IO connection is authenticated server-side via the `authenticateSocket` middleware:
+
+1. The server reads `socket.handshake.auth.token`.
+2. It verifies the token with Firebase Admin (`firebaseAuth.verifyIdToken`).
+3. It looks up the matching user in the PostgreSQL database by `firebase_uid`.
+4. If the user is found, their `id`, `role`, and `email` are attached to the socket for the lifetime of the connection.
+
+Connections without a token, with an invalid token, or with a Firebase UID that doesn't match a database user are rejected immediately.
+
+## CORS
+
+The following origins are permitted for both the HTTP REST API and the Socket.IO handshake:
+
+| Origin |
+|--------|
+| `http://localhost:3000` |
+| `http://localhost:4000` |
+| `https://paypac-backend-mono-26-production.up.railway.app` |
+| `https://paypac.com.co` |
+| `https://api.paypac.com.co` |
+| `https://app.paypac.com.co` |
+
+Requests from any other origin are blocked.
+
+---
+
+## Events
+
+<Tabs>
+  <Tab title="Ticket events">
+
+### Rooms
+
+Join the appropriate room before listening for room-scoped events.
+
+| Event | Direction | Description |
+|-------|-----------|-------------|
+| `user:join` | Client → Server | Joins the authenticated user's personal room (`user:<id>`) |
+| `staff:join-event` | Client → Server | Joins an event room (`event:<id>`) for real-time scan updates |
+| `staff:leave-event` | Client → Server | Leaves an event room |
+
+#### `user:join`
+
+Emitting this event with no payload joins the socket to the room `user:<userId>` using the authenticated user's ID. No payload is required.
+
+#### `staff:join-event`
+
+```json
+{ "event_id": 12 }
+```
+
+The server verifies the authenticated user is assigned as staff for the given event (or has the `PAYPAC` role). On success it emits `staff:joined` back to the caller.
+
+**Response — `staff:joined`:**
+```json
+{
+  "event_id": 12,
+  "message": "Conectado al evento exitosamente"
+}
+```
+
+**Error — `staff:error`:**
+```json
+{ "message": "No tienes permisos para este evento" }
+```
+
+---
+
+### QR validation
+
+#### `ticket:validate` (client → server)
+
+Staff scans a QR code to validate a ticket at entry.
+
+```json
+{
+  "qr_token": "abc123",
+  "event_id": 12,
+  "device_uuid": "optional-device-id",
+  "totp_code": "optional-totp",
+  "totp_ticket_id": 99,
+  "latitude": "4.6097",
+  "longitude": "-74.0817"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `qr_token` | string | Yes | The QR code value scanned from the ticket |
+| `event_id` | number | Yes | ID of the event being validated |
+| `device_uuid` | string | No | UUID of the scanning device |
+| `totp_code` | string | No | TOTP code for enhanced validation |
+| `totp_ticket_id` | number | No | Ticket ID associated with the TOTP |
+| `latitude` | string | No | GPS latitude of the scan location |
+| `longitude` | string | No | GPS longitude of the scan location |
+
+**Response — `ticket:validated`** (emitted to the scanning socket):
+```json
+{
+  "success": true,
+  "ticket": { "...": "ticket object" },
+  "message": "Ticket válido",
+  "scanner_id": 5
+}
+```
+
+**Broadcast — `ticket:entry`** (emitted to all sockets in `event:<id>`):
+```json
+{
+  "ticket_id": 88,
+  "customer_name": "Rock Fest 2025",
+  "locality": "VIP",
+  "scanned_by": 5,
+  "scanned_at": "2025-01-15T20:00:00.000Z"
+}
+```
+
+**Error — `ticket:error`:**
+```json
+{
+  "success": false,
+  "message": "Ticket ya fue usado",
+  "code": "VALIDATION_ERROR"
+}
+```
+
+---
+
+### NFC validation
+
+#### `nfc:challenge:request` (client → server)
+
+Request an NFC challenge before presenting the ticket chip.
+
+```json
+{ "event_id": 12 }
+```
+
+**Response — `nfc:challenge:ready`:** the challenge object returned by the service.
+
+#### `nfc:validate` (client → server)
+
+Submit the NFC chip signature for validation.
+
+```json
+{
+  "ticket_id": 88,
+  "challenge_id": "uuid-challenge",
+  "signature": "hex-signature",
+  "event_id": 12
+}
+```
+
+**Response — `ticket:validated`** (same shape as QR validation, with `"method": "NFC"`).
+
+**Broadcast — `ticket:entry`** (to `event:<id>`, includes `"method": "NFC"`).
+
+**Error — `nfc:error`:**
+```json
+{ "message": "Firma inválida" }
+```
+
+---
+
+### Ticket transfers
+
+#### `ticket:transfer` (client → server)
+
+Notify the recipient of an incoming ticket transfer.
+
+```json
+{
+  "to_user_id": 20,
+  "ticket_id": 88,
+  "transaction_type": "GIFT",
+  "message": "Te regalo este ticket"
+}
+```
+
+**Response to sender — `ticket:transfer-sent`:**
+```json
+{
+  "success": true,
+  "message": "Transferencia enviada exitosamente"
+}
+```
+
+**Event to recipient — `ticket:received`** (emitted to `user:<to_user_id>`):
+```json
+{
+  "from_user_id": 5,
+  "ticket_id": 88,
+  "transaction_type": "GIFT",
+  "message": "Te regalo este ticket",
+  "timestamp": "2025-01-15T10:00:00.000Z"
+}
+```
+
+#### `ticket:transfer:expired` (server → client)
+
+Emitted by the [ticket transfer expiry background job](/infrastructure/background-jobs) to the original sender when a pending transfer times out.
+
+```json
+{
+  "transaction_id": 42,
+  "ticket_id": 88,
+  "message": "La transferencia expiró. Tu ticket está de vuelta en tu Wallet.",
+  "timestamp": "2025-01-15T10:30:00.000Z"
+}
+```
+
+---
+
+### General notifications (ticket socket)
+
+#### `notification:send` (client → server)
+
+Send a notification to any user's personal room.
+
+```json
+{
+  "to_user_id": 20,
+  "type": "INFO",
+  "title": "Recordatorio",
+  "message": "Tu evento empieza en 1 hora",
+  "data": {}
+}
+```
+
+The server emits `notification:received` to `user:<to_user_id>` with the same fields plus a `timestamp`.
+
+  </Tab>
+  <Tab title="Notification events">
+
+### Rooms
+
+| Event | Direction | Description |
+|-------|-----------|-------------|
+| `user:join` | Client → Server | Joins the user's personal notification room |
+| `user:leave` | Client → Server | Leaves the user's personal notification room |
+
+#### `user:join`
+
+```json
+{ "user_id": 20 }
+```
+
+**Response — `user:joined`:**
+```json
+{
+  "user_id": 20,
+  "room": "user:20",
+  "message": "Conectado a notificaciones en tiempo real",
+  "timestamp": "2025-01-15T10:00:00.000Z"
+}
+```
+
+<Note>
+The ticket socket's `user:join` uses the authenticated user's ID from the token and requires no payload. The notification socket's `user:join` accepts an explicit `user_id` in the payload.
+</Note>
+
+---
+
+### Connection health
+
+#### `ping` (client → server)
+
+Send a ping to confirm the connection is alive.
+
+**Response — `pong`:**
+```json
+{ "timestamp": "2025-01-15T10:00:00.000Z" }
+```
+
+---
+
+### Payment events (server → client)
+
+All payment events are emitted to the user's personal room (`user:<id>`) by the server after processing payment webhooks. Clients should listen for these after initiating a purchase.
+
+#### `payment:completed`
+
+Emitted when webhook processing finishes, regardless of the outcome.
+
+```json
+{
+  "invoice_id": 55,
+  "num_invoice": "INV-2025-0055",
+  "transaction_id": 301,
+  "status": "APPROVED",
+  "status_message": "Pago aprobado",
+  "can_continue": true,
+  "timestamp": "2025-01-15T10:01:00.000Z"
+}
+```
+
+| `status` value | Meaning |
+|----------------|---------|
+| `APPROVED` | Payment succeeded |
+| `DECLINED` | Payment was declined |
+| `VOIDED` | Payment was voided/reversed |
+| `ERROR` | Processing error |
+| `PENDING` | Still processing |
+
+`can_continue: true` means the client can navigate away from the payment screen. `false` means the client should wait for a follow-up event.
+
+#### `transaction:updated`
+
+```json
+{
+  "transaction_id": 301,
+  "invoice_id": 55,
+  "num_invoice": "INV-2025-0055",
+  "status": "APPROVED",
+  "status_message": "Pago aprobado",
+  "amount": 150000,
+  "timestamp": "2025-01-15T10:01:00.000Z"
+}
+```
+
+#### `tickets:created`
+
+Emitted after tickets are successfully generated following an approved payment.
+
+```json
+{
+  "invoice_id": 55,
+  "num_invoice": "INV-2025-0055",
+  "transaction_id": 301,
+  "event_id": 12,
+  "ticket_count": 2,
+  "message": "¡Tus tickets han sido generados exitosamente!",
+  "timestamp": "2025-01-15T10:01:05.000Z"
+}
+```
+
+#### `tickets:error`
+
+```json
+{
+  "invoice_id": 55,
+  "num_invoice": "INV-2025-0055",
+  "error": "No hay localidades disponibles",
+  "timestamp": "2025-01-15T10:01:05.000Z"
+}
+```
+
+#### `payment:declined`
+
+```json
+{
+  "invoice_id": 55,
+  "num_invoice": "INV-2025-0055",
+  "status": "DECLINED",
+  "message": "Fondos insuficientes",
+  "timestamp": "2025-01-15T10:01:00.000Z"
+}
+```
+
+#### `payment:voided`
+
+```json
+{
+  "invoice_id": 55,
+  "num_invoice": "INV-2025-0055",
+  "message": "Pago anulado",
+  "timestamp": "2025-01-15T10:01:00.000Z"
+}
+```
+
+#### `payment:pending`
+
+```json
+{
+  "invoice_id": 55,
+  "num_invoice": "INV-2025-0055",
+  "message": "Pago en proceso",
+  "timestamp": "2025-01-15T10:01:00.000Z"
+}
+```
+
+  </Tab>
+</Tabs>
+
+---
+
+## Full connection example
+
+```javascript
+import { io } from 'socket.io-client';
+
+const socket = io('https://api.paypac.com.co', {
+  auth: { token: firebaseUser.getIdToken() },
+});
+
+// Join personal room to receive payment and transfer notifications
+socket.emit('user:join');
+
+// Listen for payment result after initiating a purchase
+socket.on('payment:completed', (data) => {
+  if (data.status === 'APPROVED' && data.can_continue) {
+    navigateTo('/wallet');
+  }
+});
+
+// Listen for ticket generation
+socket.on('tickets:created', (data) => {
+  console.log(`${data.ticket_count} ticket(s) ready for invoice ${data.num_invoice}`);
+});
+
+// Listen for an expired transfer returning a ticket
+socket.on('ticket:transfer:expired', (data) => {
+  console.log(`Ticket ${data.ticket_id} returned to your wallet`);
+});
+
+// Staff: join an event room to receive real-time scan updates
+socket.emit('staff:join-event', { event_id: 12 });
+socket.on('ticket:entry', (entry) => {
+  console.log(`Scanned by ${entry.scanned_by} — locality: ${entry.locality}`);
+});
+```

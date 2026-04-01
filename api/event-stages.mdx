@@ -1,0 +1,496 @@
+---
+title: "Event Stages"
+description: "Manage pricing stages (ticket tiers) for event localities. Stages define time-bounded pricing periods — early-bird, regular, and last-minute — for a locality's ticket sales."
+---
+
+<Info>
+  Stages belong to a [locality](/api/event-localities). Each stage has a name, a date range, and a price. Only one stage is active at any given moment (the one whose `date_start`–`date_end` window includes the current time). The active stage determines the ticket price shown to customers.
+</Info>
+
+All endpoints require a valid Firebase ID token: `Authorization: Bearer <token>`.
+
+---
+
+## **POST** /api/localities/:localityId/stages
+
+Creates a new pricing stage for a locality. Stage date ranges must not overlap with existing stages on the same locality. `date_end` must be after `date_start`.
+
+**Required role:** `ORGANIZER` (event owner) or `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="localityId" type="number" required>
+  ID of the locality to add the stage to.
+</ParamField>
+
+### Request body
+
+<ParamField body="stage_name" type="string" required>
+  Display name for the pricing tier (e.g., `"Early Bird"`, `"Regular"`, `"Last Minute"`). Minimum 2 characters.
+</ParamField>
+
+<ParamField body="date_start" type="string" required>
+  Start of the pricing window in ISO 8601 format (e.g., `"2026-06-01T00:00:00.000Z"`). Tickets in this locality are sold at `price_ticket` from this moment.
+</ParamField>
+
+<ParamField body="date_end" type="string" required>
+  End of the pricing window in ISO 8601 format. Must be strictly after `date_start`.
+</ParamField>
+
+<ParamField body="price_ticket" type="number" required>
+  Ticket price in the event's currency (integer, smallest unit — e.g., COP pesos). Must be a positive integer.
+</ParamField>
+
+### Response `201`
+
+<ResponseField name="id" type="number">
+  Auto-incremented stage ID.
+</ResponseField>
+
+<ResponseField name="locality_id" type="number">
+  ID of the parent locality.
+</ResponseField>
+
+<ResponseField name="stage_name" type="string">
+  Stage display name.
+</ResponseField>
+
+<ResponseField name="date_start" type="string">
+  Start of pricing window, ISO 8601.
+</ResponseField>
+
+<ResponseField name="date_end" type="string">
+  End of pricing window, ISO 8601.
+</ResponseField>
+
+<ResponseField name="price_ticket" type="number">
+  Ticket price.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string">
+  ISO 8601 creation timestamp.
+</ResponseField>
+
+<ResponseField name="updatedAt" type="string">
+  ISO 8601 last-update timestamp.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Validation error — e.g., `date_end` is before `date_start`, price is not a positive integer. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Caller is not the event owner or does not have `PAYPAC` role. |
+| `404`  | Locality not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://api.paypac.com.co/api/localities/7/stages \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "stage_name": "Early Bird",
+    "date_start": "2026-06-01T00:00:00.000Z",
+    "date_end": "2026-07-01T23:59:59.000Z",
+    "price_ticket": 80000
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/localities/:localityId/stages
+
+Returns all pricing stages defined for a locality, ordered by `date_start`.
+
+**Required role:** Any authenticated user
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="localityId" type="number" required>
+  ID of the locality whose stages to retrieve.
+</ParamField>
+
+### Response `200`
+
+Returns an array of stage objects. Each has the same fields as the [POST response](#post-apilocalitieslocality_idstages).
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `404`  | Locality not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/localities/7/stages \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/localities/:localityId/stages/active
+
+Returns the currently active stage for a locality — the stage whose `date_start`–`date_end` window contains the current server timestamp. This is the stage that determines the price customers see.
+
+**Required role:** Any authenticated user
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="localityId" type="number" required>
+  ID of the locality.
+</ParamField>
+
+### Response `200`
+
+Returns a single stage object, or `null` if no stage is currently active.
+
+<ResponseField name="id" type="number">Stage ID.</ResponseField>
+<ResponseField name="stage_name" type="string">Stage display name.</ResponseField>
+<ResponseField name="date_start" type="string">Start of active window.</ResponseField>
+<ResponseField name="date_end" type="string">End of active window.</ResponseField>
+<ResponseField name="price_ticket" type="number">Current ticket price.</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `404`  | Locality not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/localities/7/stages/active \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/localities/:localityId/stages/upcoming
+
+Returns all future stages for a locality — stages whose `date_start` is after the current timestamp. Useful for displaying upcoming price increases to customers.
+
+**Required role:** Any authenticated user
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="localityId" type="number" required>
+  ID of the locality.
+</ParamField>
+
+### Response `200`
+
+Returns an array of upcoming stage objects, ordered by `date_start` ascending.
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `404`  | Locality not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/localities/7/stages/upcoming \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/localities/:localityId/stages/price-stats
+
+Returns pricing statistics across all stages for a locality — minimum price, maximum price, and average price.
+
+**Required role:** Any authenticated user
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="localityId" type="number" required>
+  ID of the locality.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="min_price" type="number">
+  Lowest ticket price across all stages.
+</ResponseField>
+
+<ResponseField name="max_price" type="number">
+  Highest ticket price across all stages.
+</ResponseField>
+
+<ResponseField name="avg_price" type="number">
+  Average ticket price across all stages.
+</ResponseField>
+
+<ResponseField name="stages_count" type="number">
+  Total number of stages defined for the locality.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `404`  | Locality not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/localities/7/stages/price-stats \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/stages/:id
+
+Returns a single pricing stage by its ID.
+
+**Required role:** Any authenticated user
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Numeric stage ID.
+</ParamField>
+
+### Response `200`
+
+Returns a stage object. Same fields as the [POST response](#post-apilocalitieslocality_idstages).
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `404`  | Stage not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/stages/12 \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/stages/:id/availability
+
+Checks whether a stage is currently available for purchase — i.e., the stage is active (current timestamp is within its date range) and the parent locality has remaining ticket capacity.
+
+**Required role:** Any authenticated user
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Numeric stage ID.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="available" type="boolean">
+  `true` if tickets can currently be purchased at this stage's price.
+</ResponseField>
+
+<ResponseField name="reason" type="string">
+  Human-readable reason when `available` is `false` (e.g., `"Stage not yet active"`, `"Locality sold out"`).
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `404`  | Stage not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/stages/12/availability \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **PUT** /api/stages/:id
+
+Updates one or more fields of an existing pricing stage. If both `date_start` and `date_end` are provided, the updated range must still be valid (`date_end` after `date_start`).
+
+**Required role:** `ORGANIZER` (event owner) or `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Numeric stage ID.
+</ParamField>
+
+### Request body
+
+All fields are optional. Provide only the fields to update.
+
+<ParamField body="stage_name" type="string">
+  Updated stage name. Minimum 2 characters.
+</ParamField>
+
+<ParamField body="date_start" type="string">
+  Updated start datetime, ISO 8601.
+</ParamField>
+
+<ParamField body="date_end" type="string">
+  Updated end datetime, ISO 8601. Must be after `date_start` if both are provided.
+</ParamField>
+
+<ParamField body="price_ticket" type="number">
+  Updated ticket price. Positive integer.
+</ParamField>
+
+### Response `200`
+
+Returns the updated stage object.
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Validation error (e.g., invalid date order). |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Caller is not the event owner or does not have `PAYPAC` role. |
+| `404`  | Stage not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request PUT \
+  --url https://api.paypac.com.co/api/stages/12 \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "stage_name": "Super Early Bird",
+    "price_ticket": 65000,
+    "date_end": "2026-06-15T23:59:59.000Z"
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## **DELETE** /api/stages/:id
+
+Permanently deletes a pricing stage.
+
+**Required role:** `ORGANIZER` (event owner) or `PAYPAC`
+
+<Warning>Deleting an active stage will remove the current ticket price for the locality. Ensure another stage covers the remaining sales window before deleting.</Warning>
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Numeric stage ID to delete.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="message" type="string">
+  Confirmation message.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Cannot delete (e.g., stage has associated sold tickets). |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Caller is not the event owner or does not have `PAYPAC` role. |
+| `404`  | Stage not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request DELETE \
+  --url https://api.paypac.com.co/api/stages/12 \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>

@@ -1,0 +1,207 @@
+---
+title: "Notifications"
+description: "Email queue management, SMS phone verification, and FCM push token registration"
+---
+
+PayPac delivers notifications through three channels: email (via Brevo), SMS (via Onurix for 2FA), and push notifications (via Firebase Cloud Messaging).
+
+## Email queue
+
+All outbound emails are queued in the database and processed every 5 minutes by the email queue background job.
+
+### Queue an email
+
+**POST** `/api/email-queue`
+
+Queues an email message for delivery. Accessible to all authenticated roles.
+
+<ParamField body="template_code" type="string" required>
+  The template identifier. Known codes: `REGISTRATION_VERIFY_MAIL`, `NOTIFICATION_ASSIGNING_EVENT`, `TICKET_PURCHASE`
+</ParamField>
+
+<ParamField body="user_id" type="number" required>
+  ID of the recipient user
+</ParamField>
+
+<ParamField body="email_delivery" type="string" required>
+  Recipient email address
+</ParamField>
+
+<ParamField body="email_subject" type="string" required>
+  Email subject line
+</ParamField>
+
+<ParamField body="email_body" type="string" required>
+  Pre-rendered HTML body content
+</ParamField>
+
+<ParamField body="send_at" type="string">
+  ISO 8601 datetime to schedule delivery. Omit to send at next queue cycle.
+</ParamField>
+
+```bash
+curl -X POST https://api.paypac.com.co/api/email-queue \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "template_code": "NOTIFICATION_ASSIGNING_EVENT",
+    "user_id": 42,
+    "email_delivery": "staff@example.com",
+    "email_subject": "NOTIFICACION PAYPAC: Asignación de Evento",
+    "email_body": "<p>Hola Juan, has sido asignado...</p>"
+  }'
+```
+
+### Get my messages
+
+**GET** `/api/email-queue/my-messages`
+
+Returns email messages associated with the authenticated user.
+
+```bash
+curl https://api.paypac.com.co/api/email-queue/my-messages \
+  -H "Authorization: Bearer <token>"
+```
+
+### Get message by ID
+
+**GET** `/api/email-queue/:id`
+
+Retrieves a single queued message by its ID.
+
+### Get queue stats
+
+**GET** `/api/email-queue/stats`
+
+Returns queue statistics (pending, sent, failed counts). Requires **PAYPAC** role.
+
+```bash
+curl https://api.paypac.com.co/api/email-queue/stats \
+  -H "Authorization: Bearer <token>"
+```
+
+### Manually process queue
+
+**POST** `/api/email-queue/process`
+
+Triggers immediate processing of pending messages. Requires **PAYPAC** role.
+
+### Retry a failed message
+
+**POST** `/api/email-queue/:id/retry`
+
+Resets a failed message to pending for retry. Requires **PAYPAC** role.
+
+### Delete a message
+
+**DELETE** `/api/email-queue/:id`
+
+Deletes a queued or failed message. Requires **PAYPAC** role.
+
+### Clean old messages
+
+**POST** `/api/email-queue/clean-old`
+
+Removes old processed messages from the queue. Requires **PAYPAC** role.
+
+<ParamField body="days_old" type="number">
+  Messages older than this many days will be deleted. Defaults to 30.
+</ParamField>
+
+---
+
+## SMS (2FA)
+
+SMS is used for phone number verification during registration. These endpoints are **public** — no authentication required.
+
+### Send a 2FA code
+
+**POST** `/api/sms/getcode2FA`
+
+Sends a 6-digit OTP to the provided phone number via Onurix.
+
+<ParamField body="phone" type="string" required>
+  Phone number (10–15 digits, may start with `+`). Returns `409` if the number is already registered.
+</ParamField>
+
+```bash
+curl -X POST https://api.paypac.com.co/api/sms/getcode2FA \
+  -H "Content-Type: application/json" \
+  -d '{"phone": "+573001234567"}'
+```
+
+### Verify a 2FA code
+
+**POST** `/api/sms/verifycode2FA`
+
+Verifies the OTP submitted by the user.
+
+<ParamField body="phone" type="string" required>
+  The phone number that received the code
+</ParamField>
+
+<ParamField body="code" type="string" required>
+  Exactly 6 digits
+</ParamField>
+
+```bash
+curl -X POST https://api.paypac.com.co/api/sms/verifycode2FA \
+  -H "Content-Type: application/json" \
+  -d '{"phone": "+573001234567", "code": "482910"}'
+```
+
+### Check if phone exists
+
+**POST** `/api/sms/check-phone`
+
+Checks whether a phone number is already registered. Returns a redirect hint.
+
+<ParamField body="phone" type="string" required>
+  Phone number to check
+</ParamField>
+
+<ResponseField name="exists" type="boolean">
+  Whether the phone number is registered
+</ResponseField>
+
+<ResponseField name="redirect" type="string">
+  Either `"login"` or `"register"` — indicates where to send the user
+</ResponseField>
+
+---
+
+## FCM push tokens
+
+Register and manage Firebase Cloud Messaging device tokens for push notifications.
+
+### Register / update FCM token
+
+**PUT** `/api/fcm-token`
+
+Saves or updates the FCM push token for the authenticated user. Call this after login or when the FCM token refreshes.
+
+<ParamField body="fcm_token" type="string" required>
+  The Firebase Cloud Messaging device token
+</ParamField>
+
+```bash
+curl -X PUT https://api.paypac.com.co/api/fcm-token \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"fcm_token": "fABC123...xyz"}'
+```
+
+### Remove FCM token
+
+**DELETE** `/api/fcm-token`
+
+Removes the FCM token for the authenticated user. Call this on logout to stop receiving push notifications.
+
+```bash
+curl -X DELETE https://api.paypac.com.co/api/fcm-token \
+  -H "Authorization: Bearer <token>"
+```
+
+<Note>
+  Push notifications for ticket events and status changes are delivered automatically by the server. See [WebSockets](/infrastructure/websockets) for real-time in-app updates.
+</Note>

@@ -1,0 +1,391 @@
+---
+title: "Event Localities"
+description: "Manage general-admission locality zones for events. Each locality defines a named area within an unnumbered event with its own ticket quota, visual branding, and pricing stages."
+---
+
+<Info>
+  Localities apply to events with `type_venue: SIN_NUMERAR` (general admission). For numbered-seat events, use [Venues](/api/venues) instead. Each locality can have multiple [pricing stages](/api/event-stages) that define ticket prices over time.
+</Info>
+
+All endpoints require a valid Firebase ID token: `Authorization: Bearer <token>`.
+
+---
+
+## **POST** /api/events/:eventId/localities
+
+Creates a new locality zone for a specific event.
+
+**Required role:** `ORGANIZER` (event owner) or `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="eventId" type="number" required>
+  ID of the event to add the locality to.
+</ParamField>
+
+### Request body
+
+<ParamField body="name_locality" type="string" required>
+  Display name for the locality zone (e.g., `"VIP"`, `"General"`, `"Palco"`). Minimum 2 characters.
+</ParamField>
+
+<ParamField body="bkg_color" type="string" required>
+  Background color as a hexadecimal string (e.g., `"#FF5733"`). Used to visually differentiate zones on the event map.
+</ParamField>
+
+<ParamField body="title_color" type="string" required>
+  Color for the locality title text, in hex format (e.g., `"#FFFFFF"`).
+</ParamField>
+
+<ParamField body="text_color" type="string" required>
+  Color for body text within the locality card, in hex format.
+</ParamField>
+
+<ParamField body="title_color_location" type="string" required>
+  Secondary title color specific to the location badge, in hex format.
+</ParamField>
+
+<ParamField body="num_max_tickets" type="number">
+  Maximum number of tickets available for this locality. Defaults to `0`. Set a positive integer to cap sales.
+</ParamField>
+
+<ParamField body="require_num_tickets" type="boolean">
+  When `true`, the system enforces the `num_max_tickets` cap and rejects purchases that would exceed it. Defaults to `false`.
+</ParamField>
+
+### Response `201`
+
+<ResponseField name="id" type="number">
+  Auto-incremented locality ID.
+</ResponseField>
+
+<ResponseField name="event_id" type="number">
+  ID of the parent event.
+</ResponseField>
+
+<ResponseField name="name_locality" type="string">
+  Locality name.
+</ResponseField>
+
+<ResponseField name="bkg_color" type="string">
+  Background color hex.
+</ResponseField>
+
+<ResponseField name="title_color" type="string">
+  Title text color hex.
+</ResponseField>
+
+<ResponseField name="text_color" type="string">
+  Body text color hex.
+</ResponseField>
+
+<ResponseField name="title_color_location" type="string">
+  Location badge title color hex.
+</ResponseField>
+
+<ResponseField name="num_max_tickets" type="number">
+  Maximum ticket quota.
+</ResponseField>
+
+<ResponseField name="num_tickets_sold" type="number">
+  Number of tickets sold so far. Initially `0`.
+</ResponseField>
+
+<ResponseField name="require_num_tickets" type="boolean">
+  Whether the ticket cap is enforced.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string">
+  ISO 8601 creation timestamp.
+</ResponseField>
+
+<ResponseField name="updatedAt" type="string">
+  ISO 8601 last-update timestamp.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Validation error (e.g., invalid hex color, missing required field). |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Caller is not the event owner or does not have `PAYPAC` role. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://api.paypac.com.co/api/events/101/localities \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "name_locality": "VIP",
+    "bkg_color": "#1A1A2E",
+    "title_color": "#FFFFFF",
+    "text_color": "#CCCCCC",
+    "title_color_location": "#FFD700",
+    "num_max_tickets": 200,
+    "require_num_tickets": true
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/events/:eventId/localities
+
+Returns all locality zones defined for a specific event.
+
+**Required role:** Any authenticated user
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="eventId" type="number" required>
+  ID of the event whose localities to retrieve.
+</ParamField>
+
+### Response `200`
+
+Returns an array of locality objects. Each object has the same fields as the [POST response](#post-apieventseventidlocalities).
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `404`  | Event not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/events/101/localities \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/events/:eventId/localities/stats
+
+Returns ticket sales statistics for each locality in an event. Includes counts of sold tickets, remaining capacity, and revenue per locality.
+
+**Required role:** `ORGANIZER` (event owner) or `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="eventId" type="number" required>
+  ID of the event.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="localities" type="object[]">
+  Statistics for each locality.
+
+  <Expandable title="locality stats properties">
+    <ResponseField name="id" type="number">Locality ID.</ResponseField>
+    <ResponseField name="name_locality" type="string">Locality name.</ResponseField>
+    <ResponseField name="num_max_tickets" type="number">Maximum ticket quota.</ResponseField>
+    <ResponseField name="num_tickets_sold" type="number">Number of tickets sold.</ResponseField>
+    <ResponseField name="remaining" type="number">Remaining available tickets.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Caller is not the event owner or does not have `PAYPAC` role. |
+| `404`  | Event not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/events/101/localities/stats \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/localities/:id
+
+Returns a single locality by its ID.
+
+**Required role:** Any authenticated user
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Numeric locality ID.
+</ParamField>
+
+### Response `200`
+
+Returns a locality object. Same fields as the [POST response](#post-apieventseventidlocalities).
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `404`  | Locality not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/localities/7 \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **PUT** /api/localities/:id
+
+Updates one or more fields of an existing locality.
+
+**Required role:** `ORGANIZER` (event owner) or `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Numeric locality ID.
+</ParamField>
+
+### Request body
+
+All fields are optional. Provide only the fields to update.
+
+<ParamField body="name_locality" type="string">
+  Updated locality name. Minimum 2 characters.
+</ParamField>
+
+<ParamField body="bkg_color" type="string">
+  Updated background color hex (e.g., `"#3D5AFE"`).
+</ParamField>
+
+<ParamField body="title_color" type="string">
+  Updated title text color hex.
+</ParamField>
+
+<ParamField body="text_color" type="string">
+  Updated body text color hex.
+</ParamField>
+
+<ParamField body="title_color_location" type="string">
+  Updated location badge title color hex.
+</ParamField>
+
+### Response `200`
+
+Returns the updated locality object.
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Validation error. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Caller is not the event owner or does not have `PAYPAC` role. |
+| `404`  | Locality not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request PUT \
+  --url https://api.paypac.com.co/api/localities/7 \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "name_locality": "VIP Premium",
+    "bkg_color": "#0D0D2B"
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## **DELETE** /api/localities/:id
+
+Permanently deletes a locality. This will also remove associated stages.
+
+**Required role:** `ORGANIZER` (event owner) or `PAYPAC`
+
+<Warning>Deleting a locality removes all its pricing stages and may affect existing tickets if any have been sold.</Warning>
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Numeric locality ID to delete.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="message" type="string">
+  Confirmation message.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Cannot delete (tickets already sold for this locality). |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Caller is not the event owner or does not have `PAYPAC` role. |
+| `404`  | Locality not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request DELETE \
+  --url https://api.paypac.com.co/api/localities/7 \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>

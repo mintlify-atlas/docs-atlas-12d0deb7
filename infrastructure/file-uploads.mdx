@@ -1,0 +1,164 @@
+---
+title: 'File uploads'
+description: 'Upload images and files to AWS S3 via the PayPac upload API'
+keywords: ['file upload', 's3', 'images', 'documents', 'storage', 'multer']
+---
+
+Files are stored in AWS S3 (or an S3-compatible endpoint). The upload API accepts multipart form data, validates the file type and size, stores the object in the appropriate bucket folder, and returns a proxy URL you can use directly in other API requests.
+
+<Warning>
+The global multer limit is **20 MB** per request. Individual upload endpoints enforce stricter per-type limits described below. Requests exceeding these limits are rejected before reaching the controller.
+</Warning>
+
+---
+
+## Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/upload/image` | Upload an image file |
+| `POST` | `/api/upload/document` | Upload a document file |
+| `DELETE` | `/api/upload/file` | Delete a previously uploaded file |
+| `GET` | `/api/upload/file/*key` | Read a file by its storage key (public, no auth) |
+
+---
+
+## Upload an image
+
+**`POST /api/upload/image`**
+
+Accepts a single file in the `file` field of a `multipart/form-data` request.
+
+| Property | Value |
+|----------|-------|
+| Field name | `file` |
+| Allowed MIME types | `image/jpeg`, `image/png`, `image/webp` |
+| Max file size | **5 MB** |
+| Storage folder | `logos/` |
+
+**Response:**
+
+```json
+{
+  "url": "https://api.paypac.com.co/upload/file/logos/550e8400-e29b-41d4-a716-446655440000.jpg"
+}
+```
+
+---
+
+## Upload a document
+
+**`POST /api/upload/document`**
+
+| Property | Value |
+|----------|-------|
+| Field name | `file` |
+| Allowed MIME types | `application/pdf`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document` (`.docx`), `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` (`.xlsx`) |
+| Max file size | **20 MB** |
+| Storage folder | `documents/` |
+
+**Response:**
+
+```json
+{
+  "url": "https://api.paypac.com.co/upload/file/documents/550e8400-e29b-41d4-a716-446655440000.pdf"
+}
+```
+
+---
+
+## Delete a file
+
+**`DELETE /api/upload/file`**
+
+Pass the full proxy URL returned by a previous upload in the request body.
+
+```json
+{
+  "url": "https://api.paypac.com.co/upload/file/logos/550e8400-e29b-41d4-a716-446655440000.jpg"
+}
+```
+
+**Response:**
+
+```json
+{ "message": "Archivo eliminado" }
+```
+
+---
+
+## How to upload a file
+
+<Steps>
+  <Step title="Choose the correct endpoint">
+    Use `POST /api/upload/image` for JPEG, PNG, or WebP images. Use `POST /api/upload/document` for PDF, DOCX, or XLSX files.
+  </Step>
+  <Step title="Send a multipart/form-data request">
+    Attach the file under the field name `file`. Include your authorization header if required by your client.
+
+    <CodeGroup>
+
+    ```bash curl
+    curl -X POST https://api.paypac.com.co/api/upload/image \
+      -H "Authorization: Bearer <token>" \
+      -F "file=@/path/to/image.jpg"
+    ```
+
+    ```javascript JavaScript
+    const formData = new FormData();
+    formData.append('file', fileInput.files[0]);
+
+    const response = await fetch('https://api.paypac.com.co/api/upload/image', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
+
+    const { url } = await response.json();
+    ```
+
+    </CodeGroup>
+  </Step>
+  <Step title="Save the returned URL">
+    The response contains a `url` field. Store this value and pass it to event or company create/update requests.
+  </Step>
+</Steps>
+
+---
+
+## Using the URL in other requests
+
+The URL returned by the upload endpoint can be used directly in the fields that accept image or file URLs across the API.
+
+**Common use cases:**
+
+| Field | Resource |
+|-------|----------|
+| Event image / thumbnail | Event create or update |
+| Event cover photo | Event create or update |
+| Company logo | Company create or update |
+| Company cover photo | Company create or update |
+
+**Example — create an event with an uploaded image:**
+
+```json
+{
+  "name": "Rock Fest 2025",
+  "img_event": "https://api.paypac.com.co/upload/file/logos/550e8400-e29b-41d4-a716-446655440000.jpg",
+  "cover_event": "https://api.paypac.com.co/upload/file/logos/660e8400-e29b-41d4-a716-446655440001.png"
+}
+```
+
+---
+
+## Storage details
+
+Files are stored in AWS S3 using a randomly generated UUID filename to avoid collisions. The key format is:
+
+```
+<folder>/<uuid><original-extension>
+```
+
+Example: `logos/550e8400-e29b-41d4-a716-446655440000.jpg`
+
+Files can be read publicly through the proxy endpoint `GET /api/upload/file/*key` without authentication. The proxy sets a one-year `Cache-Control` header (`public, max-age=31536000`).

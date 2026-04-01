@@ -1,0 +1,95 @@
+---
+title: 'Background jobs'
+description: 'Automated cron jobs that run on a schedule to maintain platform health'
+keywords: ['cron', 'background jobs', 'email queue', 'event finalizer', 'ticket transfer']
+---
+
+Three background jobs start automatically when the server boots. They run on fixed schedules and require no manual intervention or API triggers.
+
+## Jobs overview
+
+| Job | Function | Schedule |
+|-----|----------|----------|
+| Email queue processor | Sends pending notification emails via Brevo | Every 5 minutes |
+| Email queue cleaner | Deletes old sent messages | Daily at 2:00 AM |
+| Event finalizer | Transitions ended events to `FINALIZED` | Every hour |
+| Ticket transfer expiry | Cancels stale pending ticket transfers | Every hour |
+
+---
+
+## Email queue processor
+
+**Function:** `startEmailQueueProcessor`
+
+Runs every 5 minutes (`*/5 * * * *`). On each tick it calls `NotificationMessageQueueService.processPendingMessages()`, which picks up all `NotificationMessageQueue` entries with a `PENDING` status, sends them via the Brevo email provider, and marks each message as either `SENT` or `FAILED`.
+
+Each run logs the number of sent messages, failed messages, and total processed.
+
+<Note>
+The processor does not retry failed messages on subsequent runs unless the calling code explicitly resets their status back to `PENDING`.
+</Note>
+
+### Email queue cleaner
+
+**Function:** `startEmailQueueCleaner`
+
+Runs daily at 2:00 AM (`0 2 * * *`). Calls `NotificationMessageQueueService.cleanOldMessages(30, 'PAYPAC')`, which permanently deletes sent messages older than 30 days that belong to the `PAYPAC` sender scope.
+
+---
+
+## Event finalizer
+
+**Function:** `startEventFinalizer`
+
+Runs every hour (`setInterval` of 3,600,000 ms). On each tick it queries all events with `status: 'ACTIVE'` whose `date_end_event` is less than or equal to the current time. For each matching event it:
+
+1. Updates the event `status` to `'FINALIZED'`.
+2. Calls `EventLiquidationService.autoCreateFromEvent(event.id)` to automatically generate the event's financial liquidation record.
+
+If an individual event fails to process, the error is logged and the job continues with the remaining events.
+
+| Field checked | Condition |
+|---------------|-----------|
+| `status` | Must be `ACTIVE` |
+| `date_end_event` | Must be ≤ current timestamp |
+
+<Note>
+Only `ACTIVE` events are eligible for automatic finalization. Events in any other status (e.g., `DRAFT`, `CANCELLED`, `FINALIZED`) are ignored.
+</Note>
+
+---
+
+## Ticket transfer expiry
+
+**Function:** `startTicketTransferExpiry`
+
+Runs every hour (`setInterval` of 3,600,000 ms). On each tick it finds all `TicketTransaction` records with `status_ticket: 'PENDING'` that were created before the cutoff time. For each expired transaction it:
+
+1. Returns ownership of the ticket to the original sender via `TicketRepository.transferOwnership`.
+2. Sets the ticket status back to `'ACTIVE'`.
+3. Marks the `TicketTransaction` as `'CANCELLED'`.
+4. Emits a `ticket:transfer:expired` Socket.IO event to the sender's personal room (`user:<id>`).
+5. Sends an FCM push notification to the sender if they have an `fcm_token` registered.
+
+<Note>
+The cutoff window is defined in code. Review `src/jobs/ticket-transfer-expiry.ts` for the current value before relying on a specific expiry duration in client logic.
+</Note>
+
+### Transfer expiry payload (Socket.IO)
+
+When a transfer expires, the following event is emitted to the original sender:
+
+```json
+{
+  "transaction_id": 42,
+  "ticket_id": 7,
+  "message": "La transferencia expiró. Tu ticket está de vuelta en tu Wallet.",
+  "timestamp": "2025-01-15T10:30:00.000Z"
+}
+```
+
+---
+
+## No manual triggers
+
+None of the jobs above expose an HTTP endpoint. They are started once at server boot and run on their fixed schedules for the lifetime of the process. To change a schedule, update the cron expression or interval value in the corresponding source file and redeploy.

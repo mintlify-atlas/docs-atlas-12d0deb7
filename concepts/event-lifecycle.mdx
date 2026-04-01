@@ -1,0 +1,116 @@
+---
+title: "Event Lifecycle"
+description: "How events progress through creation, approval, scheduling, and finalization"
+keywords: ["event", "lifecycle", "status", "CREATED", "APPROVED", "SCHEDULED", "ACTIVE", "FINALIZED", "CANCELED"]
+---
+
+Every event in PayPac moves through a defined set of statuses from the moment an organizer creates it to the moment it is finalized. Status transitions are strictly validated — only `PAYPAC` can advance an event's status, and only along permitted paths.
+
+## Status flow
+
+<Steps>
+  <Step title="CREATED">
+    An `ORGANIZER` or `PAYPAC` creates the event via `POST /api/events`. The event starts in `CREATED` status and is not yet visible to customers or promoters.
+
+    **Allowed transitions:** `APPROVED`, `CANCELED`
+  </Step>
+  <Step title="APPROVED">
+    `PAYPAC` reviews and approves the event via `PATCH /api/events/:id/status`. Once approved, the event becomes visible to `CUSTOMER` and `PROMOTER` roles. Ticket sales can begin.
+
+    **Allowed transitions:** `SCHEDULED`, `CANCELED`
+
+    <Note>
+      After an event is `APPROVED`, only `PAYPAC` can edit it. The organizer's `PUT /api/events/:id` request will be rejected with a permission error.
+    </Note>
+  </Step>
+  <Step title="SCHEDULED">
+    The event has a confirmed date and is scheduled to go live. Organizers can still configure localities, stages, and staff assignments.
+
+    **Allowed transitions:** `ACTIVE`, `RE_SCHEDULED`, `CANCELED`
+  </Step>
+  <Step title="ACTIVE">
+    The event is live. Ticket validation at the venue is permitted. Staff can check in and begin scanning.
+
+    **Allowed transitions:** `FINALIZED`, `CANCELED`
+  </Step>
+  <Step title="FINALIZED">
+    The event has concluded. No further status changes are possible. Finalizing an event automatically triggers the creation of a liquidation record via `EventLiquidationService.autoCreateFromEvent`.
+
+    **Allowed transitions:** none
+  </Step>
+</Steps>
+
+Two additional statuses exist outside the main flow:
+
+| Status | Description |
+|--------|-------------|
+| `CANCELED` | The event was canceled. No further transitions are permitted. |
+| `RE_SCHEDULED` | The event date changed. Can return to `SCHEDULED` or be `CANCELED`. |
+
+The full transition map enforced by `EventService.updateEventStatus`:
+
+```
+CREATED      → APPROVED, CANCELED
+APPROVED     → SCHEDULED, CANCELED
+SCHEDULED    → ACTIVE, RE_SCHEDULED, CANCELED
+ACTIVE       → FINALIZED, CANCELED
+RE_SCHEDULED → SCHEDULED, CANCELED
+CANCELED     → (terminal)
+FINALIZED    → (terminal)
+```
+
+## Event types
+
+The `event_type` field controls visibility and access:
+
+| Value | Description |
+|-------|-------------|
+| `PUBLICO` | Public event. Visible to all authenticated users including `CUSTOMER` and `PROMOTER`. |
+| `PRIVADO` | Private event. Access is controlled and not surfaced in general event listings. |
+
+## Venue types
+
+The `type_venue` field determines how seating is managed:
+
+| Value | Description |
+|-------|-------------|
+| `SIN_NUMERAR` | General admission. Tickets are not tied to specific seats. Localities and stages control capacity. |
+| `NUMERADO` | Numbered seating. Each ticket is linked to a specific seat via the `EventPlaces` hierarchy. |
+
+## Date types
+
+The `date_type` field (enum `EventDateType`) describes the event's scheduling pattern:
+
+| Value | Description |
+|-------|-------------|
+| `SINGLE` | One-time event on a single day. |
+| `MULTIPLE` | Event repeats on multiple discrete dates. |
+| `RANGE_DATE` | Event runs continuously across a date range. |
+| `RANGE_DATE_EXCEPT` | Date range with specific excluded dates. |
+| `EXPLICIT_DATES` | Organizer provides an explicit list of individual dates. |
+
+## Background finalization
+
+The `event-finalizer` background job automatically transitions events from `ACTIVE` to `FINALIZED` once their end date (`date_end_event`) has passed. This prevents events from staying in `ACTIVE` indefinitely when no manual finalization occurs.
+
+When finalization happens (whether manual or automatic), `EventLiquidationService.autoCreateFromEvent` runs and creates an `EventLiquidation` record that captures:
+
+- Gross ticket revenue
+- PayPac commission amount
+- Promoter commission totals
+- Refunds processed
+- Net payout amount
+
+## Key event fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `date_event` | `DateTime` | Event start date and time |
+| `date_end_event` | `DateTime?` | Event end date (optional for open-ended events) |
+| `date_checkin_open` | `DateTime?` | Earliest time staff can begin validating tickets |
+| `date_checkin_close` | `DateTime?` | Latest time ticket validation is accepted |
+| `commission_percentage` | `Float?` | PayPac's commission rate on ticket sales for this event |
+| `num_max_tickets` | `Int` | Maximum total tickets that can be sold across all localities |
+| `sales_channel` | `String` | Where tickets are sold: `"app"`, `"web"`, or `"promoter"` |
+| `allow_external_promoters` | `Boolean` | Whether external promoters can earn commission on this event |
+| `apply_dcto` | `Boolean` | Whether discount codes are enabled for this event |

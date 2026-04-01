@@ -1,0 +1,75 @@
+---
+title: "PayPac Backend API"
+description: "A comprehensive event ticketing and payment platform API for managing events, tickets, invoices, and promoters."
+---
+
+Welcome to the **PayPac Backend API** — the server-side engine powering the PayPac event ticketing platform. This API enables you to create and manage events, sell tickets, process payments, handle promoter programs, and deliver real-time notifications to end users.
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Make your first API call in minutes
+  </Card>
+  <Card title="Authentication" icon="lock" href="/authentication">
+    Authenticate requests with Firebase + JWT
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/auth">
+    Explore every endpoint with full schema docs
+  </Card>
+  <Card title="Core Concepts" icon="book" href="/concepts/roles-permissions">
+    Understand roles, events, tickets, and payments
+  </Card>
+</CardGroup>
+
+## What you can build
+
+PayPac provides everything you need to run a full event ticketing operation:
+
+<CardGroup cols={2}>
+  <Card title="Event Management" icon="calendar" href="/guides/creating-events">
+    Create public or private events with numbered or general-admission seating, multi-date support, and approval workflows.
+  </Card>
+  <Card title="Ticket Sales" icon="ticket" href="/guides/selling-tickets">
+    Issue, transfer, and validate tickets with TOTP-based QR codes and NFC support.
+  </Card>
+  <Card title="Payment Processing" icon="credit-card" href="/concepts/payments">
+    Process transactions via the Wompi gateway with webhook reconciliation and invoice management.
+  </Card>
+  <Card title="Promoter Program" icon="users" href="/guides/promoters">
+    Assign promoters with custom reward rules (percentage, fixed amount, ticket rewards) and track balances.
+  </Card>
+  <Card title="Staff Assignment" icon="id-badge" href="/guides/managing-staff">
+    Assign staff and promoter-staff roles to events with geolocation check-in.
+  </Card>
+  <Card title="Real-time Updates" icon="bolt" href="/infrastructure/websockets">
+    Push live ticket status and notifications to connected clients via Socket.IO.
+  </Card>
+</CardGroup>
+
+## Roles at a glance
+
+Every request is authenticated and authorized against one of six roles:
+
+| Role | Description |
+|------|-------------|
+| `PAYPAC` | Platform super-admin — full access |
+| `ORGANIZER` | Event organizer — manages their own events, staff, and reports |
+| `STAFF` | Event staff — validates tickets at the door |
+| `STAFF_PROMOTER` | Staff with promoter capabilities |
+| `PROMOTER` | External ticket promoter |
+| `CUSTOMER` | End-user buyer |
+
+<Tip>
+  See [Roles & Permissions](/concepts/roles-permissions) for a complete breakdown of what each role can access.
+</Tip>
+
+## Base URL
+
+All API endpoints are served from:
+
+```
+https://api.paypac.com.co
+```
+
+```
+http://localhost:5000  (local development)
+```

@@ -1,0 +1,466 @@
+---
+title: "Transactions"
+description: "Process payments and manage transaction history via Wompi"
+---
+
+The Transactions API integrates with [Wompi](https://wompi.com), the Colombian payment gateway. A transaction record is created for every payment attempt and stores the full Wompi response alongside internal metadata. Transactions are linked to invoices via their `invoice_id` reference field.
+
+<Note>
+  Wompi payment status values (`APPROVED`, `PENDING`, `DECLINED`, `VOIDED`, `ERROR`) are distinct from the internal `InvoiceStatus` enum. The internal invoice status is updated through the webhook endpoint on the [Invoices](/api/invoices) API.
+</Note>
+
+## TransactionStatus enum (Wompi gateway)
+
+| Value | Description |
+|---|---|
+| `APPROVED` | Payment was approved by the card network |
+| `PENDING` | Awaiting confirmation from the gateway |
+| `DECLINED` | Payment was declined |
+| `VOIDED` | Transaction was voided |
+| `ERROR` | An error occurred during processing |
+
+---
+
+## POST /api/transactions/signature
+
+**Roles:** All authenticated roles
+
+Generates a Wompi integrity signature for client-side payment widgets. The server creates a fresh invoice reference number and signs it together with the amount and currency so the frontend can initialize the Wompi widget without exposing the private key.
+
+### Body
+
+<ParamField body="amount" type="number" required>
+  Payment amount in cents (e.g., `15000000` for COP $150,000). Must be a positive integer.
+</ParamField>
+
+<ParamField body="currency" type="string" required>
+  ISO 4217 currency code. Exactly 3 characters (e.g., `COP`).
+</ParamField>
+
+<ParamField body="expiration_date" type="string" required>
+  Expiration datetime for the payment session (ISO 8601 format).
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="reference" type="string">Newly generated invoice reference number. Pass this to the Wompi widget as `reference`.</ResponseField>
+<ResponseField name="signature" type="string">HMAC-SHA256 integrity signature. Pass this to the Wompi widget as `signature`.</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Missing required fields or signature generation failure |
+| `401` | Missing or invalid authentication token |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url "https://api.paypac.com.co/api/transactions/signature" \
+  --header "Authorization: Bearer <token>" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "amount": 15000000,
+    "currency": "COP",
+    "expiration_date": "2026-04-15T23:59:00-05:00"
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## POST /api/transactions/process
+
+**Roles:** All authenticated roles
+
+Processes a complete payment transaction end-to-end:
+
+1. Creates an `Invoice` and `InvoiceTickets` records.
+2. Acquires a Wompi `payment_source` using the provided card token.
+3. Submits the transaction to Wompi.
+4. Stores the result in the `Transactions` table.
+5. Returns the invoice, transaction record, and Wompi response.
+
+<Warning>
+  The user account is temporarily locked (`status = 99`) during processing to prevent double-spending. The lock is released whether the payment succeeds or fails.
+</Warning>
+
+### Body
+
+<ParamField body="user_id" type="number" required>
+  Internal user ID of the purchaser.
+</ParamField>
+
+<ParamField body="user_uid" type="string" required>
+  Firebase UID of the purchaser.
+</ParamField>
+
+<ParamField body="user_num_doc" type="string" required>
+  Document number of the purchaser.
+</ParamField>
+
+<ParamField body="user_type_doc" type="string" required>
+  Document type (e.g., `CC`, `CE`, `PA`).
+</ParamField>
+
+<ParamField body="event_id" type="number" required>
+  ID of the event being purchased.
+</ParamField>
+
+<ParamField body="qty_items" type="number" required>
+  Total number of items in the purchase.
+</ParamField>
+
+<ParamField body="apply_discount" type="number" default="0">
+  `1` if a discount is applied, `0` otherwise.
+</ParamField>
+
+<ParamField body="amount_in_cents" type="number" required>
+  Total amount in cents.
+</ParamField>
+
+<ParamField body="status" type="string" required>
+  Initial transaction status string passed from the client.
+</ParamField>
+
+<ParamField body="customer_ID_phone" type="string" required>
+  Phone UUID of the customer's device. Stored on issued tickets.
+</ParamField>
+
+<ParamField body="codeDCTO" type="string" default="">
+  Discount code, if applied.
+</ParamField>
+
+<ParamField body="paymentMethodType" type="string" required>
+  Wompi payment method type (e.g., `CARD`).
+</ParamField>
+
+<ParamField body="token_card_user" type="string" required>
+  Wompi card token obtained from the client-side tokenization widget.
+</ParamField>
+
+<ParamField body="installments_user" type="number" default="1">
+  Number of installments (1–36).
+</ParamField>
+
+<ParamField body="shoppingCart" type="object[]" required>
+  Array of cart items. Must contain at least one entry.
+  <Expandable title="cart item fields">
+    <ParamField body="shoppingCart[].stage_id" type="number" required>Stage ID.</ParamField>
+    <ParamField body="shoppingCart[].stage_name" type="string" required>Stage name.</ParamField>
+    <ParamField body="shoppingCart[].locality_id" type="number" required>Locality ID.</ParamField>
+    <ParamField body="shoppingCart[].locality_name" type="string" required>Locality name.</ParamField>
+    <ParamField body="shoppingCart[].ticket_price" type="number" required>Unit price before discount.</ParamField>
+    <ParamField body="shoppingCart[].ticket_final_price" type="number" required>Unit price after discount.</ParamField>
+  </Expandable>
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="message" type="string">Status message from the processing pipeline.</ResponseField>
+<ResponseField name="invoice" type="object">Created invoice record.</ResponseField>
+<ResponseField name="transaction" type="object">
+  Created transaction record.
+  <Expandable title="transaction fields">
+    <ResponseField name="id" type="number">Transaction ID.</ResponseField>
+    <ResponseField name="user_id" type="number">Purchaser's user ID.</ResponseField>
+    <ResponseField name="invoice_id" type="string">Invoice reference number.</ResponseField>
+    <ResponseField name="reference" type="string">Wompi payment reference.</ResponseField>
+    <ResponseField name="amount_in_cents" type="number">Payment amount in cents.</ResponseField>
+    <ResponseField name="currency" type="string">Currency code.</ResponseField>
+    <ResponseField name="payment_method_type" type="string">Payment method used.</ResponseField>
+    <ResponseField name="status" type="string">Transaction status (`PENDING` on creation).</ResponseField>
+    <ResponseField name="status_message" type="string">Human-readable status description.</ResponseField>
+    <ResponseField name="created_at" type="string">Transaction creation timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="payment_result" type="object">
+  Raw Wompi processing result.
+  <Expandable title="payment_result fields">
+    <ResponseField name="status" type="string">`success` or `failed`.</ResponseField>
+    <ResponseField name="payment_source_id" type="string">Wompi payment source ID.</ResponseField>
+    <ResponseField name="wompi_transaction_id" type="string">Wompi's own transaction ID.</ResponseField>
+    <ResponseField name="reference" type="string">Invoice reference.</ResponseField>
+    <ResponseField name="message" type="string">Result message from Wompi.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | User not found, Wompi payment failed, or invalid card token |
+| `401` | Missing or invalid authentication token |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url "https://api.paypac.com.co/api/transactions/process" \
+  --header "Authorization: Bearer <token>" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "user_id": 123,
+    "user_uid": "firebase-uid-123",
+    "user_num_doc": "1234567890",
+    "user_type_doc": "CC",
+    "event_id": 42,
+    "qty_items": 2,
+    "apply_discount": 0,
+    "amount_in_cents": 15000000,
+    "status": "PENDING",
+    "customer_ID_phone": "device-uuid-123",
+    "codeDCTO": "",
+    "paymentMethodType": "CARD",
+    "token_card_user": "tok_test_abc123",
+    "installments_user": 1,
+    "shoppingCart": [
+      {
+        "stage_id": 5,
+        "stage_name": "General Admission",
+        "locality_id": 3,
+        "locality_name": "Floor",
+        "ticket_price": 7500000,
+        "ticket_final_price": 7500000
+      }
+    ]
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## GET /api/transactions/my-transactions
+
+**Roles:** All authenticated roles
+
+Returns all transactions belonging to the authenticated user.
+
+### Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="count" type="number">Number of transactions returned.</ResponseField>
+<ResponseField name="transactions" type="object[]">Array of transaction records.</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Server error |
+| `401` | Missing or invalid authentication token |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url "https://api.paypac.com.co/api/transactions/my-transactions" \
+  --header "Authorization: Bearer <token>"
+```
+
+</CodeGroup>
+
+---
+
+## GET /api/transactions/by-reference/:reference
+
+**Role:** `PAYPAC`
+
+Looks up a transaction by its Wompi/invoice reference number. Intended for support and reconciliation workflows.
+
+### Path parameters
+
+<ParamField path="reference" type="string" required>
+  Invoice reference number (e.g., `PYC-20240401-001`).
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="transaction" type="object">Full transaction record matching the reference.</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Transaction not found or server error |
+| `401` | Missing or invalid authentication token |
+| `403` | Caller does not have `PAYPAC` role |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url "https://api.paypac.com.co/api/transactions/by-reference/PYC-20240401-001" \
+  --header "Authorization: Bearer <token>"
+```
+
+</CodeGroup>
+
+---
+
+## GET /api/transactions/by-invoice/:invoice_id
+
+**Role:** `PAYPAC`
+
+Looks up a transaction by its linked invoice ID string. Intended for payment reconciliation and support.
+
+### Path parameters
+
+<ParamField path="invoice_id" type="string" required>
+  Invoice reference string (the `invoice_id` field stored on the transaction).
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="transaction" type="object">Full transaction record linked to the invoice.</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Transaction not found or server error |
+| `401` | Missing or invalid authentication token |
+| `403` | Caller does not have `PAYPAC` role |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url "https://api.paypac.com.co/api/transactions/by-invoice/PYC-20240401-001" \
+  --header "Authorization: Bearer <token>"
+```
+
+</CodeGroup>
+
+---
+
+## GET /api/transactions
+
+**Role:** `PAYPAC`
+
+Returns every transaction in the system. Administrative view only.
+
+### Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="count" type="number">Total number of transactions.</ResponseField>
+<ResponseField name="transactions" type="object[]">Array of all transaction records.</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Server error |
+| `401` | Missing or invalid authentication token |
+| `403` | Caller does not have `PAYPAC` role |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url "https://api.paypac.com.co/api/transactions" \
+  --header "Authorization: Bearer <token>"
+```
+
+</CodeGroup>
+
+---
+
+## GET /api/transactions/by-status/:status
+
+**Role:** `PAYPAC`
+
+Returns all transactions filtered by Wompi gateway status.
+
+### Path parameters
+
+<ParamField path="status" type="string" required>
+  Wompi gateway status. One of `APPROVED`, `PENDING`, `DECLINED`, `VOIDED`, `ERROR`.
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="count" type="number">Number of transactions matching the status.</ResponseField>
+<ResponseField name="transactions" type="object[]">Array of transaction records with the given status.</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Invalid status value or server error |
+| `401` | Missing or invalid authentication token |
+| `403` | Caller does not have `PAYPAC` role |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url "https://api.paypac.com.co/api/transactions/by-status/APPROVED" \
+  --header "Authorization: Bearer <token>"
+```
+
+</CodeGroup>
+
+---
+
+## GET /api/transactions/:id
+
+**Roles:** All authenticated roles (ownership-checked server-side)
+
+Returns a single transaction by its internal ID. The caller must be the transaction owner or have the `PAYPAC` role.
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Transaction ID.
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="transaction" type="object">
+  Full transaction record.
+  <Expandable title="transaction fields">
+    <ResponseField name="id" type="number">Transaction ID.</ResponseField>
+    <ResponseField name="user_id" type="number">Owner's user ID.</ResponseField>
+    <ResponseField name="user_uid" type="string">Owner's Firebase UID.</ResponseField>
+    <ResponseField name="invoice_id" type="string">Invoice reference string.</ResponseField>
+    <ResponseField name="reference" type="string">Wompi payment reference.</ResponseField>
+    <ResponseField name="amount_in_cents" type="number">Payment amount in cents.</ResponseField>
+    <ResponseField name="currency" type="string">Currency code.</ResponseField>
+    <ResponseField name="payment_method_type" type="string">Payment method type.</ResponseField>
+    <ResponseField name="payment_method" type="object">Payment method details (JSON).</ResponseField>
+    <ResponseField name="status" type="string">Current Wompi gateway status.</ResponseField>
+    <ResponseField name="status_message" type="string">Status description.</ResponseField>
+    <ResponseField name="customer_email" type="string">Customer email used for the payment.</ResponseField>
+    <ResponseField name="billing_data" type="string">Billing data JSON string.</ResponseField>
+    <ResponseField name="meta" type="object">Internal metadata including `customer_ID_phone`, `codeDCTO`, and `wompi_transaction_id`.</ResponseField>
+    <ResponseField name="created_at" type="string">Transaction creation timestamp.</ResponseField>
+    <ResponseField name="finalized_at" type="string">Transaction finalization timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Transaction not found or caller is not the owner |
+| `401` | Missing or invalid authentication token |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url "https://api.paypac.com.co/api/transactions/777" \
+  --header "Authorization: Bearer <token>"
+```
+
+</CodeGroup>

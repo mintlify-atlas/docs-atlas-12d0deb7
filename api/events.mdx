@@ -1,0 +1,628 @@
+---
+title: "Events"
+description: "Create, list, update, and manage the lifecycle status of events. Events can be unnumbered (general admission) or numbered (assigned seating)."
+---
+
+<Info>
+  All endpoints require a valid Firebase ID token: `Authorization: Bearer <token>`. Event visibility and write access are scoped by the caller's role.
+</Info>
+
+---
+
+## **POST** /api/events
+
+Creates a new event. The `organizer_id` is set automatically from the authenticated user.
+
+**Required role:** `ORGANIZER` or `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Request body
+
+<ParamField body="name" type="string" required>
+  Event name. Minimum 3 characters.
+</ParamField>
+
+<ParamField body="short_description" type="string" required>
+  Brief summary shown in listings. Minimum 10 characters.
+</ParamField>
+
+<ParamField body="description" type="string" required>
+  Full event description. Minimum 20 characters.
+</ParamField>
+
+<ParamField body="date_event" type="string" required>
+  Event start date and time in ISO 8601 format (e.g., `"2026-07-15T20:00:00.000Z"`).
+</ParamField>
+
+<ParamField body="place_address" type="string" required>
+  Venue street address. Minimum 5 characters.
+</ParamField>
+
+<ParamField body="city" type="string" required>
+  City where the event takes place. Minimum 2 characters.
+</ParamField>
+
+<ParamField body="country" type="string" required>
+  Country where the event takes place. Minimum 2 characters.
+</ParamField>
+
+<ParamField body="event_type" type="string" default="PUBLICO">
+  Visibility type. `PUBLICO` (public) or `PRIVADO` (private).
+</ParamField>
+
+<ParamField body="type_venue" type="string" default="SIN_NUMERAR">
+  Seating format. `SIN_NUMERAR` (general admission) or `NUMERADO` (numbered seats). Numbered events require a `numbered_place_id`.
+</ParamField>
+
+<ParamField body="date_type" type="string" default="SINGLE">
+  Date structure. One of: `SINGLE`, `MULTIPLE`, `RANGE_DATE`, `RANGE_DATE_EXCEPT`, `EXPLICIT_DATES`.
+</ParamField>
+
+<ParamField body="image" type="string">
+  URL of the event thumbnail image.
+</ParamField>
+
+<ParamField body="cover" type="string">
+  URL of the event cover/banner image.
+</ParamField>
+
+<ParamField body="date_end_event" type="string">
+  Event end date and time in ISO 8601 format (optional).
+</ParamField>
+
+<ParamField body="date_checkin_open" type="string">
+  When check-in opens, ISO 8601 (optional).
+</ParamField>
+
+<ParamField body="date_checkin_close" type="string">
+  When check-in closes, ISO 8601 (optional).
+</ParamField>
+
+<ParamField body="latitude" type="string">
+  Venue latitude coordinate.
+</ParamField>
+
+<ParamField body="longitude" type="string">
+  Venue longitude coordinate.
+</ParamField>
+
+<ParamField body="currency" type="string" default="COP">
+  Currency code (e.g., `"COP"`, `"USD"`).
+</ParamField>
+
+<ParamField body="url_video" type="string">
+  URL of a promo video (optional).
+</ParamField>
+
+<ParamField body="num_max_tickets" type="number" default="0">
+  Maximum number of tickets available. Positive integer. Used for general-admission events.
+</ParamField>
+
+<ParamField body="category_id" type="number">
+  Category ID (optional).
+</ParamField>
+
+<ParamField body="subcategory_id" type="number">
+  Subcategory ID (optional).
+</ParamField>
+
+<ParamField body="subgenre_id" type="number">
+  Subgenre ID (optional).
+</ParamField>
+
+<ParamField body="apply_dcto" type="boolean" default="false">
+  Whether discounts are enabled for this event.
+</ParamField>
+
+<ParamField body="allow_external_promoters" type="boolean" default="false">
+  Whether external promoters can sell tickets.
+</ParamField>
+
+<ParamField body="allow_paypac_promotion" type="boolean" default="false">
+  Whether PayPac can promote this event on the platform.
+</ParamField>
+
+<ParamField body="sales_channel" type="string" default="app">
+  Sales channel(s) — e.g., `"app"`, `"web"`, `"promoter"`.
+</ParamField>
+
+<ParamField body="commission_to_charge" type="number" default="0">
+  Commission percentage PayPac charges on ticket sales (0–100).
+</ParamField>
+
+<ParamField body="commission_to_promoter" type="number" default="0">
+  Commission percentage paid to promoters (0–100).
+</ParamField>
+
+<ParamField body="numbered_place_id" type="number">
+  ID of an `EventPlaces` venue to use for numbered-seat assignment. Required when `type_venue` is `NUMERADO`.
+</ParamField>
+
+### Response `201`
+
+<ResponseField name="message" type="string">
+  Confirmation: `"Evento creado exitosamente"`.
+</ResponseField>
+
+<ResponseField name="event" type="object">
+  The created event record.
+
+  <Expandable title="event properties">
+    <ResponseField name="id" type="number">Auto-incremented event ID.</ResponseField>
+    <ResponseField name="name" type="string">Event name.</ResponseField>
+    <ResponseField name="status" type="string">Initial status: `CREATED`.</ResponseField>
+    <ResponseField name="organizer_id" type="number">ID of the authenticated user who created the event.</ResponseField>
+    <ResponseField name="date_event" type="string">Start date/time ISO 8601.</ResponseField>
+    <ResponseField name="createdAt" type="string">Creation timestamp ISO 8601.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Validation error. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Insufficient role. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://api.paypac.com.co/api/events \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "name": "Festival de Jazz 2026",
+    "short_description": "La mejor noche de jazz de la ciudad.",
+    "description": "Un evento único con los mejores músicos de jazz latinoamericanos reunidos en un solo escenario.",
+    "date_event": "2026-08-20T20:00:00.000Z",
+    "place_address": "Calle 72 # 10-34",
+    "city": "Bogotá",
+    "country": "Colombia",
+    "event_type": "PUBLICO",
+    "type_venue": "SIN_NUMERAR",
+    "num_max_tickets": 500,
+    "currency": "COP"
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/events
+
+Returns a paginated list of events with optional filters. All authenticated roles can call this endpoint; visibility may be scoped internally by role.
+
+**Required role:** Any authenticated user
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Query parameters
+
+<ParamField query="status" type="string">
+  Filter by one or more statuses. Use a comma to separate multiple values (e.g., `status=ACTIVE,APPROVED`). Valid values: `CREATED`, `APPROVED`, `SCHEDULED`, `ACTIVE`, `CANCELED`, `RE_SCHEDULED`, `FINALIZED`.
+</ParamField>
+
+<ParamField query="event_type" type="string">
+  Filter by visibility. `PUBLICO` or `PRIVADO`.
+</ParamField>
+
+<ParamField query="category_id" type="string">
+  Filter by category ID (numeric string).
+</ParamField>
+
+<ParamField query="subcategory_id" type="string">
+  Filter by subcategory ID (numeric string).
+</ParamField>
+
+<ParamField query="subgenre_id" type="string">
+  Filter by subgenre ID (numeric string).
+</ParamField>
+
+<ParamField query="country" type="string">
+  Filter by country name.
+</ParamField>
+
+<ParamField query="city" type="string">
+  Filter by city name.
+</ParamField>
+
+<ParamField query="search" type="string">
+  Full-text search across event name, description, and short description.
+</ParamField>
+
+<ParamField query="date_from" type="string">
+  Return events starting on or after this ISO 8601 datetime (e.g., `2026-03-01T00:00:00.000Z`).
+</ParamField>
+
+<ParamField query="date_to" type="string">
+  Return events starting on or before this ISO 8601 datetime (e.g., `2026-12-31T23:59:59.000Z`).
+</ParamField>
+
+<ParamField query="latitude" type="string">
+  Caller latitude coordinate. Reserved for future proximity search.
+</ParamField>
+
+<ParamField query="longitude" type="string">
+  Caller longitude coordinate. Reserved for future proximity search.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="total" type="number">
+  Number of events returned.
+</ResponseField>
+
+<ResponseField name="events" type="object[]">
+  List of event records.
+
+  <Expandable title="event properties">
+    <ResponseField name="id" type="number">Event ID.</ResponseField>
+    <ResponseField name="name" type="string">Event name.</ResponseField>
+    <ResponseField name="short_description" type="string">Brief summary.</ResponseField>
+    <ResponseField name="date_event" type="string">Start date/time ISO 8601.</ResponseField>
+    <ResponseField name="city" type="string">Event city.</ResponseField>
+    <ResponseField name="country" type="string">Event country.</ResponseField>
+    <ResponseField name="status" type="string">Current event status.</ResponseField>
+    <ResponseField name="event_type" type="string">`PUBLICO` or `PRIVADO`.</ResponseField>
+    <ResponseField name="type_venue" type="string">`SIN_NUMERAR` or `NUMERADO`.</ResponseField>
+    <ResponseField name="image" type="string">Thumbnail image URL.</ResponseField>
+    <ResponseField name="cover" type="string">Cover image URL.</ResponseField>
+    <ResponseField name="organizer_id" type="number">Organizer user ID.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `500`  | Internal server error. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url 'https://api.paypac.com.co/api/events?status=ACTIVE,APPROVED&city=Bogot%C3%A1&search=jazz' \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/events/my-events
+
+Returns all events created by the authenticated organizer.
+
+**Required role:** `ORGANIZER` only
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="total" type="number">
+  Number of events owned by the organizer.
+</ResponseField>
+
+<ResponseField name="events" type="object[]">
+  List of the organizer's events. Same structure as [GET /api/events](#get-apievents).
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user is not an `ORGANIZER`. |
+| `500`  | Internal server error. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/events/my-events \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/events/organizer/stats
+
+Returns aggregate statistics for the authenticated organizer's events (e.g., counts by status, total tickets sold).
+
+**Required role:** `ORGANIZER` only
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="total" type="number">Total events owned by the organizer.</ResponseField>
+<ResponseField name="byStatus" type="object">
+  Event counts broken down by status.
+
+  <Expandable title="byStatus properties">
+    <ResponseField name="CREATED" type="number">Events in CREATED status.</ResponseField>
+    <ResponseField name="APPROVED" type="number">Events in APPROVED status.</ResponseField>
+    <ResponseField name="SCHEDULED" type="number">Events in SCHEDULED status.</ResponseField>
+    <ResponseField name="ACTIVE" type="number">Events in ACTIVE status.</ResponseField>
+    <ResponseField name="CANCELED" type="number">Events in CANCELED status.</ResponseField>
+    <ResponseField name="RE_SCHEDULED" type="number">Events in RE_SCHEDULED status.</ResponseField>
+    <ResponseField name="FINALIZED" type="number">Events in FINALIZED status.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user is not an `ORGANIZER`. |
+| `500`  | Internal server error. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/events/organizer/stats \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/events/:id
+
+Returns a single event record by ID, including related data such as localities.
+
+**Required role:** Any authenticated user
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Numeric event ID.
+</ParamField>
+
+### Response `200`
+
+Returns a full event object. Includes all fields from the `Event` model plus related associations (category, subcategory, subgenre, localities).
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `404`  | Event not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/events/101 \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **PUT** /api/events/:id
+
+Replaces updatable fields on an existing event. Only the event owner (ORGANIZER) or a PAYPAC admin can update an event.
+
+**Required role:** `ORGANIZER` (owner) or `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Numeric event ID.
+</ParamField>
+
+### Request body
+
+All fields are optional. Provide only the fields you want to change. Same fields as [POST /api/events](#post-apievents) — all optional.
+
+<ParamField body="name" type="string">Event name. Minimum 3 characters.</ParamField>
+<ParamField body="short_description" type="string">Brief summary. Minimum 10 characters.</ParamField>
+<ParamField body="description" type="string">Full description. Minimum 20 characters.</ParamField>
+<ParamField body="date_event" type="string">Start date/time ISO 8601.</ParamField>
+<ParamField body="date_end_event" type="string">End date/time ISO 8601.</ParamField>
+<ParamField body="place_address" type="string">Venue address.</ParamField>
+<ParamField body="city" type="string">City.</ParamField>
+<ParamField body="country" type="string">Country.</ParamField>
+<ParamField body="event_type" type="string">`PUBLICO` or `PRIVADO`.</ParamField>
+<ParamField body="type_venue" type="string">`SIN_NUMERAR` or `NUMERADO`.</ParamField>
+<ParamField body="date_type" type="string">Date structure type.</ParamField>
+<ParamField body="image" type="string">Thumbnail image URL.</ParamField>
+<ParamField body="cover" type="string">Cover image URL.</ParamField>
+<ParamField body="url_video" type="string">Promo video URL.</ParamField>
+<ParamField body="num_max_tickets" type="number">Maximum ticket count.</ParamField>
+<ParamField body="currency" type="string">Currency code.</ParamField>
+<ParamField body="apply_dcto" type="boolean">Enable discounts.</ParamField>
+<ParamField body="allow_external_promoters" type="boolean">Allow external promoters.</ParamField>
+<ParamField body="allow_paypac_promotion" type="boolean">Allow PayPac promotion.</ParamField>
+<ParamField body="sales_channel" type="string">Sales channel identifier.</ParamField>
+<ParamField body="commission_to_charge" type="number">PayPac commission % (0–100).</ParamField>
+<ParamField body="commission_to_promoter" type="number">Promoter commission % (0–100).</ParamField>
+<ParamField body="numbered_place_id" type="number">Venue ID for numbered seating.</ParamField>
+
+### Response `200`
+
+<ResponseField name="message" type="string">
+  Confirmation: `"Evento actualizado exitosamente"`.
+</ResponseField>
+
+<ResponseField name="event" type="object">
+  The updated event record.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Validation error or caller is not the owner. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Insufficient role. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request PUT \
+  --url https://api.paypac.com.co/api/events/101 \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "name": "Festival de Jazz 2026 — Edición Especial",
+    "num_max_tickets": 600
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## **PATCH** /api/events/:id/status
+
+Updates only the status of an event. Used by PayPac administrators to move an event through its lifecycle.
+
+**Required role:** `PAYPAC` only
+
+### Status lifecycle
+
+| Status | Meaning |
+|--------|---------|
+| `CREATED` | Event submitted by organizer, awaiting review. |
+| `APPROVED` | Approved by PayPac, not yet on sale. |
+| `SCHEDULED` | On sale and visible, event date in the future. |
+| `ACTIVE` | Event is happening now (check-in open). |
+| `CANCELED` | Event has been canceled. |
+| `RE_SCHEDULED` | Event date has changed. |
+| `FINALIZED` | Event has concluded. |
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Numeric event ID.
+</ParamField>
+
+### Request body
+
+<ParamField body="status" type="string" required>
+  New status. One of: `CREATED`, `APPROVED`, `SCHEDULED`, `ACTIVE`, `CANCELED`, `RE_SCHEDULED`, `FINALIZED`.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="message" type="string">
+  Confirmation message including the new status value.
+</ResponseField>
+
+<ResponseField name="event" type="object">
+  The updated event record with the new status.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Invalid status value or business rule violation. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PAYPAC` role. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request PATCH \
+  --url https://api.paypac.com.co/api/events/101/status \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{"status": "APPROVED"}'
+```
+
+</CodeGroup>
+
+---
+
+## **DELETE** /api/events/:id
+
+Permanently deletes an event. Only the event owner (ORGANIZER) or a PAYPAC admin can delete an event.
+
+**Required role:** `ORGANIZER` (owner) or `PAYPAC`
+
+<Warning>This action is irreversible and will also remove associated data (localities, stages, etc.).</Warning>
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Numeric event ID.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="message" type="string">
+  Confirmation: `"Evento eliminado exitosamente"`.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Cannot delete (caller is not owner, or event has sold tickets). |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Insufficient role. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request DELETE \
+  --url https://api.paypac.com.co/api/events/101 \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>

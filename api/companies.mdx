@@ -1,0 +1,867 @@
+---
+title: "Companies"
+description: "Manage organizer companies and company followers."
+---
+
+<Info>
+  All endpoints require a Firebase ID token passed as `Authorization: Bearer <token>`. Results are filtered based on the authenticated user's role — `PAYPAC` sees all companies, `ORGANIZER` sees only their own.
+</Info>
+
+---
+
+## **GET** /api/companies
+
+List all companies. Results are scoped by role: `PAYPAC` can see all companies and filter by status; `ORGANIZER` sees only their own company; other roles see only approved companies.
+
+**Required role:** Any authenticated user
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Query parameters
+
+<ParamField query="search" type="string">
+  Text search against company name.
+</ParamField>
+
+<ParamField query="country_id" type="number">
+  Filter by country ID.
+</ParamField>
+
+<ParamField query="state_id" type="number">
+  Filter by state/department ID.
+</ParamField>
+
+<ParamField query="city_id" type="number">
+  Filter by city ID.
+</ParamField>
+
+<ParamField query="status" type="number">
+  Filter by status. `0` = pending, `1` = approved, `2` = suspended. Only usable by `PAYPAC`.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="message" type="string">
+  `"Empresas obtenidas exitosamente"`
+</ResponseField>
+
+<ResponseField name="data" type="object[]">
+  Array of company objects.
+
+  <Expandable title="company properties">
+    <ResponseField name="id" type="number">Company ID.</ResponseField>
+    <ResponseField name="company_name" type="string">Legal company name. Unique.</ResponseField>
+    <ResponseField name="company_description" type="string">Short description.</ResponseField>
+    <ResponseField name="company_logo" type="string">URL to the company logo image.</ResponseField>
+    <ResponseField name="company_cover" type="string">URL to the company cover image.</ResponseField>
+    <ResponseField name="company_phone_number" type="string">Contact phone number.</ResponseField>
+    <ResponseField name="company_email" type="string">Contact email. Unique.</ResponseField>
+    <ResponseField name="type_identification" type="string">Identification document type (e.g. `NIT`).</ResponseField>
+    <ResponseField name="num_identification" type="string">Identification document number.</ResponseField>
+    <ResponseField name="website" type="string">Company website URL.</ResponseField>
+    <ResponseField name="address" type="string">Physical address.</ResponseField>
+    <ResponseField name="company_presentation" type="string">Extended presentation text.</ResponseField>
+    <ResponseField name="rating" type="number">Average rating (0–5).</ResponseField>
+    <ResponseField name="status" type="number">`0` = pending, `1` = approved, `2` = suspended.</ResponseField>
+    <ResponseField name="country_id" type="number">Country FK.</ResponseField>
+    <ResponseField name="state_id" type="number">State FK.</ResponseField>
+    <ResponseField name="city_id" type="number">City FK.</ResponseField>
+    <ResponseField name="approved_at" type="string">ISO 8601 timestamp of approval, or `null`.</ResponseField>
+    <ResponseField name="createdAt" type="string">ISO 8601 creation timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Query validation error. |
+| `401`  | Missing or invalid Bearer token. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url 'https://api.paypac.com.co/api/companies?status=1&country_id=1' \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/companies/stats
+
+Returns aggregate statistics for all companies. Optionally filtered by country or status.
+
+**Required role:** `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Query parameters
+
+<ParamField query="country_id" type="number">
+  Restrict stats to a specific country.
+</ParamField>
+
+<ParamField query="status" type="number">
+  Restrict stats to companies with a specific status. `0` = pending, `1` = approved, `2` = suspended.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="message" type="string">
+  `"Estadísticas obtenidas exitosamente"`
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  Aggregated company statistics.
+
+  <Expandable title="stats properties">
+    <ResponseField name="total" type="number">Total number of companies matching the filter.</ResponseField>
+    <ResponseField name="pending" type="number">Companies awaiting approval (`status = 0`).</ResponseField>
+    <ResponseField name="approved" type="number">Approved companies (`status = 1`).</ResponseField>
+    <ResponseField name="suspended" type="number">Suspended companies (`status = 2`).</ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Query validation error. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PAYPAC` role. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url 'https://api.paypac.com.co/api/companies/stats?status=0' \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/companies/my-companies
+
+Returns all companies registered by the authenticated organizer.
+
+**Required role:** `ORGANIZER`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="message" type="string">
+  `"Mis empresas obtenidas exitosamente"`
+</ResponseField>
+
+<ResponseField name="data" type="object[]">
+  Array of company objects belonging to the authenticated organizer. Same shape as the list response above.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `ORGANIZER` role. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/companies/my-companies \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/companies/my-profile
+
+Returns the company profile associated with the authenticated user's account.
+
+**Required role:** `ORGANIZER` or `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="success" type="boolean">
+  `true`
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  The company object linked to the authenticated user's `company_id`. Returns `400` if the user has no company associated.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Authenticated user has no associated company. |
+| `401`  | Missing or invalid Bearer token. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/companies/my-profile \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/companies/:id
+
+Retrieve a single company by its ID.
+
+**Required role:** Any authenticated user
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Company ID.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="message" type="string">
+  `"Empresa obtenida exitosamente"`
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  The company object. Same shape as the list response.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `404`  | Company not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/companies/12 \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **POST** /api/companies
+
+Create a new company. When called by an `ORGANIZER`, the company is automatically linked to their user account. When called by `PAYPAC`, the company starts in pending status.
+
+**Required role:** `PAYPAC` or `ORGANIZER`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Request body
+
+<ParamField body="company_name" type="string" required>
+  Legal company name. Must be unique across all companies.
+</ParamField>
+
+<ParamField body="company_description" type="string">
+  Short description of the company.
+</ParamField>
+
+<ParamField body="company_logo" type="string">
+  URL to the company logo image.
+</ParamField>
+
+<ParamField body="company_cover" type="string">
+  URL to the company cover image.
+</ParamField>
+
+<ParamField body="company_phone_number" type="string">
+  Contact phone number.
+</ParamField>
+
+<ParamField body="company_email" type="string">
+  Contact email address. Must be unique.
+</ParamField>
+
+<ParamField body="type_identification" type="string">
+  Document type used for the company identification (e.g. `NIT`).
+</ParamField>
+
+<ParamField body="num_identification" type="string">
+  Identification document number.
+</ParamField>
+
+<ParamField body="website" type="string">
+  Company website URL.
+</ParamField>
+
+<ParamField body="address" type="string">
+  Physical address.
+</ParamField>
+
+<ParamField body="company_presentation" type="string">
+  Extended presentation text shown on the public profile.
+</ParamField>
+
+<ParamField body="country_id" type="number">
+  Country FK. References `Countries.id`.
+</ParamField>
+
+<ParamField body="state_id" type="number">
+  State/department FK. References `States.id`.
+</ParamField>
+
+<ParamField body="city_id" type="number">
+  City FK. References `Cities.id`.
+</ParamField>
+
+### Response `201`
+
+<ResponseField name="message" type="string">
+  `"Empresa creada exitosamente"`
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  The newly created company object.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Validation error or company name/email already exists. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PAYPAC` or `ORGANIZER` role. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://api.paypac.com.co/api/companies \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "company_name": "Eventos Bogotá SAS",
+    "company_email": "info@eventosbogota.com",
+    "company_phone_number": "3001234567",
+    "type_identification": "NIT",
+    "num_identification": "900123456-1",
+    "country_id": 1,
+    "state_id": 3,
+    "city_id": 11
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## **PUT** /api/companies/:id
+
+Update an existing company. An `ORGANIZER` can only update their own company and only while it has not yet been approved. `PAYPAC` can update any company at any time.
+
+**Required role:** `PAYPAC` or `ORGANIZER`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Company ID.
+</ParamField>
+
+### Request body
+
+All fields are optional. Only provided fields are updated.
+
+<ParamField body="company_name" type="string">
+  Legal company name. Must remain unique.
+</ParamField>
+
+<ParamField body="company_description" type="string">
+  Short description.
+</ParamField>
+
+<ParamField body="company_logo" type="string">
+  URL to the logo image.
+</ParamField>
+
+<ParamField body="company_cover" type="string">
+  URL to the cover image.
+</ParamField>
+
+<ParamField body="company_phone_number" type="string">
+  Contact phone number.
+</ParamField>
+
+<ParamField body="company_email" type="string">
+  Contact email address.
+</ParamField>
+
+<ParamField body="type_identification" type="string">
+  Identification document type.
+</ParamField>
+
+<ParamField body="num_identification" type="string">
+  Identification document number.
+</ParamField>
+
+<ParamField body="website" type="string">
+  Company website URL.
+</ParamField>
+
+<ParamField body="address" type="string">
+  Physical address.
+</ParamField>
+
+<ParamField body="company_presentation" type="string">
+  Extended presentation text.
+</ParamField>
+
+<ParamField body="country_id" type="number">
+  Country FK.
+</ParamField>
+
+<ParamField body="state_id" type="number">
+  State FK.
+</ParamField>
+
+<ParamField body="city_id" type="number">
+  City FK.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="message" type="string">
+  `"Empresa actualizada exitosamente"`
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  The updated company object.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Validation error, or `ORGANIZER` attempted to edit an already-approved company. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | `ORGANIZER` attempted to edit a company they do not own. |
+| `404`  | Company not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request PUT \
+  --url https://api.paypac.com.co/api/companies/12 \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "company_description": "Somos la mejor empresa de eventos de Bogotá.",
+    "website": "https://eventosbogota.com"
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## **PATCH** /api/companies/:id/approve
+
+Approve a pending company. Sets `status` to `1` and records `approved_at`.
+
+**Required role:** `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Company ID.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="message" type="string">
+  `"Empresa aprobada exitosamente"`
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  The updated company with `status: 1` and a populated `approved_at` timestamp.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Company is already approved, or other business rule error. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PAYPAC` role. |
+| `404`  | Company not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request PATCH \
+  --url https://api.paypac.com.co/api/companies/12/approve \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **PATCH** /api/companies/:id/status
+
+Manually set a company's status to any value.
+
+**Required role:** `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Company ID.
+</ParamField>
+
+### Request body
+
+<ParamField body="status" type="number" required>
+  Target status. `0` = pending, `1` = approved, `2` = suspended.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="message" type="string">
+  `"Status actualizado exitosamente"`
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  The updated company object.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Validation error or invalid status value. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PAYPAC` role. |
+| `404`  | Company not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request PATCH \
+  --url https://api.paypac.com.co/api/companies/12/status \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{ "status": 2 }'
+```
+
+</CodeGroup>
+
+---
+
+## **DELETE** /api/companies/:id
+
+Delete a company. Only succeeds if the company has no associated users.
+
+**Required role:** `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Company ID.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="message" type="string">
+  `"Empresa eliminada exitosamente"`
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  The deleted company record.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Company has associated users and cannot be deleted. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PAYPAC` role. |
+| `404`  | Company not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request DELETE \
+  --url https://api.paypac.com.co/api/companies/12 \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/companies/following
+
+Returns all companies the authenticated user currently follows.
+
+**Required role:** `CUSTOMER`, `PROMOTER`, `STAFF`, or `STAFF_PROMOTER`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Response `200`
+
+Array of company objects the authenticated user follows.
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `500`  | Internal server error. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/companies/following \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **POST** /api/companies/:companyId/follow
+
+Follow a company.
+
+**Required role:** `CUSTOMER`, `PROMOTER`, `STAFF`, or `STAFF_PROMOTER`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="companyId" type="number" required>
+  ID of the company to follow.
+</ParamField>
+
+### Response `201`
+
+Returns the created follower relationship record.
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `404`  | Company not found. |
+| `409`  | User is already following this company. |
+| `500`  | Internal server error. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://api.paypac.com.co/api/companies/12/follow \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **DELETE** /api/companies/:companyId/unfollow
+
+Unfollow a company.
+
+**Required role:** `CUSTOMER`, `PROMOTER`, `STAFF`, or `STAFF_PROMOTER`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="companyId" type="number" required>
+  ID of the company to unfollow.
+</ParamField>
+
+### Response `200`
+
+Confirmation that the follow relationship was removed.
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `404`  | Company not found. |
+| `409`  | User is not currently following this company. |
+| `500`  | Internal server error. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request DELETE \
+  --url https://api.paypac.com.co/api/companies/12/unfollow \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/companies/:companyId/followers
+
+List all users who follow a specific company.
+
+**Required role:** `PAYPAC` or `ORGANIZER`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="companyId" type="number" required>
+  Company ID.
+</ParamField>
+
+### Response `200`
+
+Array of follower records, each containing the user ID, follower ID, and timestamps.
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PAYPAC` or `ORGANIZER` role. |
+| `404`  | Company not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/companies/12/followers \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/companies/:companyId/is-following
+
+Check whether the authenticated user follows a specific company.
+
+**Required role:** `CUSTOMER`, `PROMOTER`, `STAFF`, or `STAFF_PROMOTER`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="companyId" type="number" required>
+  Company ID to check.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="is_following" type="boolean">
+  `true` if the authenticated user follows this company, `false` otherwise.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `500`  | Internal server error. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/companies/12/is-following \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>

@@ -1,0 +1,491 @@
+---
+title: "Ticket Transactions"
+description: "Track ticket transfer, sale, and gift transaction history"
+---
+
+A TicketTransaction record is created every time a ticket changes hands — whether through a direct transfer, a peer-to-peer sale, or a gift. This model provides a full audit trail of ticket custody and drives the accept/reject workflow that protects both sender and receiver.
+
+Real-time notifications (Socket.IO events and FCM push notifications) are dispatched to involved parties at each status change. Email notifications are queued through the internal notification system.
+
+## TicketTransaction model fields
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `number` | Record ID |
+| `ticket_id` | `number` | The ticket being transferred |
+| `from_customer_id` | `number` | User ID of the sender |
+| `from_customer_uid` | `string` | Firebase UID of the sender |
+| `from_customer_UUID_phone` | `string` | Phone UUID of the sender's device |
+| `from_customer_token` | `string` | Ticket token held by the sender before transfer |
+| `reference_ticket` | `string` | Ticket reference number |
+| `booking_ticket` | `string` | Ticket booking number |
+| `to_customer_id` | `number` | User ID of the recipient (placeholder for unregistered users) |
+| `to_customer_uid` | `string` | Firebase UID of the recipient, or contact string if unregistered |
+| `to_customer_UUID_phone` | `string` | Phone UUID of the recipient's device |
+| `to_customer_token` | `string` | New ticket token generated for the recipient |
+| `type_transaction` | `string` | `transfer`, `sale`, or `gift` |
+| `ev_name` | `string` | Event name snapshot |
+| `transaction_description` | `string` | Optional message from the sender |
+| `status_ticket` | `TransactionStatus` | Current status of the transaction |
+| `created_at` | `string` | ISO 8601 creation timestamp |
+| `updated_at` | `string` | ISO 8601 last-update timestamp |
+| `completed_at` | `string \| null` | Timestamp when the transaction was completed, or `null` |
+
+## TransactionStatus enum
+
+| Value | Description |
+|---|---|
+| `PENDING` | Awaiting acceptance by the recipient |
+| `FROZEN` | Locked while awaiting payment (peer-to-peer sales) |
+| `PAID` | Payment received for a sale |
+| `ACCEPTED` | Recipient accepted the transfer |
+| `RECEIVED` | Ticket received |
+| `COMPLETED` | Transfer fully completed |
+| `REJECTED` | Recipient declined the transfer; ticket returned to sender |
+| `CANCELLED` | Sender canceled before the recipient responded |
+| `ON_SALE` | Ticket listed for peer-to-peer sale |
+
+---
+
+## POST /api/ticket-transactions
+
+**Roles:** All authenticated roles
+
+Initiates a ticket transfer, sale, or gift to another user identified by email address or phone number. The ticket is immediately frozen (`status_ticket = FROZEN`) in the `Ticket` table while the transaction is `PENDING`. If the recipient is not yet registered in PayPac, the transfer is held for 48 hours and an invitation email is sent to the provided contact.
+
+### Body
+
+<ParamField body="ticket_id" type="number" required>
+  ID of the ticket to send.
+</ParamField>
+
+<ParamField body="contact" type="string" required>
+  Email address or phone number of the recipient. Minimum 5 characters.
+</ParamField>
+
+<ParamField body="type_transaction" type="string" required>
+  Transaction type. One of `transfer`, `sale`, or `gift`.
+</ParamField>
+
+<ParamField body="transaction_description" type="string">
+  Optional message to include with the transfer. Maximum 300 characters.
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="transaction" type="object">The created TicketTransaction record.</ResponseField>
+<ResponseField name="is_registered" type="boolean">`true` if the recipient was found in the PayPac user database.</ResponseField>
+<ResponseField name="message" type="string">
+  Human-readable outcome. If the recipient is not registered, this message explains the 48-hour hold and invitation flow.
+</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Ticket in non-transferable status or invalid request body |
+| `401` | Missing or invalid authentication token |
+| `403` | Ticket does not belong to the caller |
+| `404` | Ticket not found |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url "https://api.paypac.com.co/api/ticket-transactions" \
+  --header "Authorization: Bearer <token>" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "ticket_id": 123,
+    "contact": "friend@example.com",
+    "type_transaction": "gift",
+    "transaction_description": "Enjoy the concert!"
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## POST /api/ticket-transactions/accept-by-contact
+
+**Roles:** All authenticated roles
+
+Called automatically when a new user completes registration. Searches for any `PENDING` ticket transactions addressed to the user's email or phone number and links them to the newly created account. A Socket.IO `ticket:received` event is emitted so the user immediately sees the pending ticket in their wallet.
+
+### Body
+
+<ParamField body="contact" type="string" required>
+  Email address or phone number of the newly registered user. Minimum 5 characters.
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="updated" type="number">Number of pending transactions claimed by this user.</ResponseField>
+<ResponseField name="transaction_ids" type="number[]">IDs of the updated TicketTransaction records.</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Server error |
+| `401` | Missing or invalid authentication token |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url "https://api.paypac.com.co/api/ticket-transactions/accept-by-contact" \
+  --header "Authorization: Bearer <token>" \
+  --header "Content-Type: application/json" \
+  --data '{"contact": "newuser@example.com"}'
+```
+
+</CodeGroup>
+
+---
+
+## GET /api/ticket-transactions/pending
+
+**Roles:** All authenticated roles
+
+Returns all `PENDING` ticket transactions where the authenticated user is the recipient. Use this to populate the "incoming transfers" badge and list in the app.
+
+### Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="count" type="number">Number of pending transactions.</ResponseField>
+<ResponseField name="transactions" type="object[]">Array of pending TicketTransaction records.</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Server error |
+| `401` | Missing or invalid authentication token |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url "https://api.paypac.com.co/api/ticket-transactions/pending" \
+  --header "Authorization: Bearer <token>"
+```
+
+</CodeGroup>
+
+---
+
+## GET /api/ticket-transactions/history
+
+**Roles:** All authenticated roles
+
+Returns the complete ticket transaction history for the authenticated user — both sent and received.
+
+### Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="count" type="number">Total number of transactions in history.</ResponseField>
+<ResponseField name="transactions" type="object[]">Array of TicketTransaction records ordered by `created_at` descending.</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Server error |
+| `401` | Missing or invalid authentication token |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url "https://api.paypac.com.co/api/ticket-transactions/history" \
+  --header "Authorization: Bearer <token>"
+```
+
+</CodeGroup>
+
+---
+
+## GET /api/ticket-transactions/sent
+
+**Roles:** All authenticated roles
+
+Returns ticket transactions initiated by the authenticated user.
+
+### Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="count" type="number">Number of sent transactions.</ResponseField>
+<ResponseField name="transactions" type="object[]">Array of TicketTransaction records where the caller is `from_customer_id`.</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Server error |
+| `401` | Missing or invalid authentication token |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url "https://api.paypac.com.co/api/ticket-transactions/sent" \
+  --header "Authorization: Bearer <token>"
+```
+
+</CodeGroup>
+
+---
+
+## GET /api/ticket-transactions/received
+
+**Roles:** All authenticated roles
+
+Returns ticket transactions where the authenticated user is the recipient.
+
+### Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="count" type="number">Number of received transactions.</ResponseField>
+<ResponseField name="transactions" type="object[]">Array of TicketTransaction records where the caller is `to_customer_id`.</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Server error |
+| `401` | Missing or invalid authentication token |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url "https://api.paypac.com.co/api/ticket-transactions/received" \
+  --header "Authorization: Bearer <token>"
+```
+
+</CodeGroup>
+
+---
+
+## GET /api/ticket-transactions/count/pending
+
+**Roles:** All authenticated roles
+
+Returns only the count of pending incoming transfers. Use this for notification badge counts without fetching full records.
+
+### Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="count" type="number">Number of `PENDING` transactions where the caller is the recipient.</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Server error |
+| `401` | Missing or invalid authentication token |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url "https://api.paypac.com.co/api/ticket-transactions/count/pending" \
+  --header "Authorization: Bearer <token>"
+```
+
+</CodeGroup>
+
+---
+
+## GET /api/ticket-transactions/ticket/:ticketId/history
+
+**Roles:** All authenticated roles (ownership-checked server-side)
+
+Returns the full chain of custody for a specific ticket. Only the current ticket owner can view this history.
+
+### Path parameters
+
+<ParamField path="ticketId" type="number" required>
+  Ticket ID.
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="count" type="number">Number of transactions in the ticket's history.</ResponseField>
+<ResponseField name="transactions" type="object[]">Array of TicketTransaction records for this ticket, ordered chronologically.</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Ticket not found or caller is not the current owner |
+| `401` | Missing or invalid authentication token |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url "https://api.paypac.com.co/api/ticket-transactions/ticket/123/history" \
+  --header "Authorization: Bearer <token>"
+```
+
+</CodeGroup>
+
+---
+
+## GET /api/ticket-transactions/:id
+
+**Roles:** All authenticated roles (participation-checked server-side)
+
+Returns a single ticket transaction. Only users who are the sender (`from_customer_id`) or recipient (`to_customer_id`) of the transaction may access it.
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  TicketTransaction ID.
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="transaction" type="object">Full TicketTransaction record.</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Transaction not found or caller is not a participant |
+| `401` | Missing or invalid authentication token |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url "https://api.paypac.com.co/api/ticket-transactions/55" \
+  --header "Authorization: Bearer <token>"
+```
+
+</CodeGroup>
+
+---
+
+## POST /api/ticket-transactions/:id/accept
+
+**Roles:** All authenticated roles
+
+The recipient accepts a pending ticket transfer. For `transfer` and `gift` types the transaction moves to `COMPLETED`. For `sale` type the transaction must first be in `PENDING` (not `FROZEN`) — payment must complete before calling accept.
+
+Emits a `ticket:transfer:accepted` Socket.IO event and sends an FCM push notification to the sender.
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  TicketTransaction ID.
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="message" type="string">Confirmation of acceptance.</ResponseField>
+<ResponseField name="transaction" type="object">Updated TicketTransaction with `status_ticket = "COMPLETED"` and `completed_at` set.</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Transaction not found, not in an acceptable status, or sale awaiting payment |
+| `401` | Missing or invalid authentication token |
+| `403` | Caller is not the recipient of this transaction |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url "https://api.paypac.com.co/api/ticket-transactions/55/accept" \
+  --header "Authorization: Bearer <token>"
+```
+
+</CodeGroup>
+
+---
+
+## POST /api/ticket-transactions/:id/reject
+
+**Roles:** All authenticated roles
+
+The recipient rejects a pending ticket transfer. The ticket is returned to the sender with its original token and status reset to `ACTIVE`.
+
+Emits a `ticket:transfer:rejected` Socket.IO event and sends an FCM push notification to the sender.
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  TicketTransaction ID.
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="message" type="string">Confirmation of rejection and ticket return.</ResponseField>
+<ResponseField name="transaction" type="object">Updated TicketTransaction with `status_ticket = "REJECTED"`.</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Transaction not found or not in a rejectable status (`PENDING` or `FROZEN`) |
+| `401` | Missing or invalid authentication token |
+| `403` | Caller is not the recipient of this transaction |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url "https://api.paypac.com.co/api/ticket-transactions/55/reject" \
+  --header "Authorization: Bearer <token>"
+```
+
+</CodeGroup>
+
+---
+
+## POST /api/ticket-transactions/:id/cancel
+
+**Roles:** All authenticated roles
+
+The sender cancels a pending transfer before the recipient responds. The ticket is returned to the sender and its status is reset to `ACTIVE`.
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  TicketTransaction ID.
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">Always `true` on success.</ResponseField>
+<ResponseField name="message" type="string">Confirmation of cancellation.</ResponseField>
+<ResponseField name="transaction" type="object">Updated TicketTransaction with `status_ticket = "CANCELLED"`.</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Transaction not found or not in a cancelable status (`PENDING` or `FROZEN`) |
+| `401` | Missing or invalid authentication token |
+| `403` | Caller is not the sender of this transaction |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url "https://api.paypac.com.co/api/ticket-transactions/55/cancel" \
+  --header "Authorization: Bearer <token>"
+```
+
+</CodeGroup>

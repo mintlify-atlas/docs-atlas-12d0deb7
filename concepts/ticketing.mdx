@@ -1,0 +1,122 @@
+---
+title: "Ticketing"
+description: "How tickets are issued, transferred, and validated in PayPac"
+keywords: ["tickets", "QR", "TOTP", "NFC", "transfer", "validation", "seating", "TicketStatus"]
+---
+
+Tickets are created automatically when a payment is confirmed. Each ticket contains multiple independent security tokens and supports three validation methods: static QR, dynamic TOTP QR, and NFC with RSA challenge-response.
+
+## Ticket lifecycle
+
+| Status | Description |
+|--------|-------------|
+| `PENDING` | Ticket created but payment not yet confirmed. |
+| `PAID` | Payment confirmed. Ticket is ready to use but has not been activated at the venue. |
+| `ACTIVE` | Ticket has been explicitly activated (used after transfer in some flows). |
+| `USED` | Ticket was scanned and accepted at the event entrance. Terminal state. |
+| `FROZEN` | Ticket is locked pending a transfer or sale transaction. |
+| `TRANSFERRED` | Ticket has been transferred to a new owner. The new owner receives a regenerated `token_ticket`. |
+| `CANCELED` | Ticket was canceled by the owner or by `PAYPAC`. |
+| `EXPIRED` | Ticket expired without being used. |
+| `ON_SALE` | Ticket is listed for resale. |
+
+Tickets are created with status `PAID` immediately upon payment confirmation from the Wompi webhook.
+
+## Security model
+
+Each ticket carries several security fields generated at creation time:
+
+| Field | Description |
+|-------|-------------|
+| `reference_ticket` | A unique alphanumeric identifier for the ticket. Used as part of token validation. |
+| `booking_ticket` | A human-readable booking code in the format `PYC` + 4 random characters + last 2 digits of the timestamp. |
+| `token_ticket` | A secret token derived from `reference_ticket`, `booking_ticket`, and the buyer's phone identifier. Used to authenticate QR scans. |
+| `totp_secret` | A TOTP seed used to generate time-based one-time codes for dynamic QR validation. Regenerated on transfer. |
+| `nfc_id` | Optional NFC tag identifier. |
+| `device_public_key` | An RSA public key registered by the ticket holder's device. Used for NFC challenge-response verification. |
+| `device_uuid` | The UUID of the device that holds the ticket. Optionally checked during QR validation to detect QR sharing. |
+
+On transfer, `token_ticket` is regenerated using the new owner's phone identifier, and `device_public_key`, `device_uuid`, and `totp_secret` are all reset — the previous owner's credentials are invalidated.
+
+## Ticket transfers
+
+Any user can transfer a ticket they own via `POST /api/tickets/:id/transfer`. Only tickets with status `PAID` or `ACTIVE` that have not yet been used (`ticket_first_time = 1`) can be transferred.
+
+The `type_transaction` field on `TicketTransaction` describes the nature of the transfer:
+
+| Type | Description |
+|------|-------------|
+| `transfer` | Standard transfer to another user at no cost. |
+| `sale` | Transfer involving payment between users. |
+| `gift` | Gift transfer — no payment required. |
+
+Pending transfer transactions expire after 48 hours via the `ticket-transfer-expiry` background job. If the recipient does not accept within that window, the transfer is voided and the ticket reverts to its original owner.
+
+## Ticket validation flow
+
+Ticket validation at venue entry is performed by `STAFF`, `STAFF_PROMOTER`, `ORGANIZER`, or `PAYPAC` via `POST /api/tickets/:id/validate`.
+
+<Steps>
+  <Step title="Identify the validation method">
+    The scanner selects one of three methods:
+    - **Token QR** — sends the `token_ticket` value from the QR code
+    - **Token QR + device UUID** — additionally verifies the ticket belongs to the registered device
+    - **TOTP** — sends a time-based code from the ticket holder's dynamic QR, along with the `ticket_id`
+  </Step>
+  <Step title="Locate and authenticate the ticket">
+    For token-based methods, the API looks up the ticket by `token_ticket` and re-derives the expected token from `reference_ticket`, `booking_ticket`, and `customer_ID_phone`. If they do not match, validation is rejected.
+
+    For TOTP, the API looks up the ticket by ID and validates the code against `totp_secret` using a standard TOTP algorithm.
+  </Step>
+  <Step title="Verify scanner permissions">
+    - `STAFF` and `STAFF_PROMOTER` must have an `EventStaffAssignment` for the event and must have set `checked_in = true`.
+    - `ORGANIZER` must be the event's organizer (`organizer_id` matches the authenticated user).
+    - `PAYPAC` can validate any ticket at any event.
+  </Step>
+  <Step title="Check the check-in window">
+    The current time is compared against `date_checkin_open` and `date_checkin_close` on the event. Validation is rejected if the window has not opened or has already closed.
+  </Step>
+  <Step title="Confirm ticket validity">
+    The ticket must have `ticket_first_time = 1` (not previously used) and a status of `PAID`, `ACTIVE`, or `TRANSFERRED`. Any other state returns an error.
+  </Step>
+  <Step title="Mark as used">
+    `ticket_first_time` is set to `0` and `used_at` is recorded. The response includes the validated ticket and the scanner's identity.
+  </Step>
+</Steps>
+
+### NFC validation
+
+NFC validation uses a challenge-response protocol:
+
+1. The scanner calls `generateNFCChallenge` to receive a `challenge_id` and `challenge_value`. The challenge expires in 15 seconds.
+2. The ticket holder's device signs `challenge_value` with the device's RSA private key.
+3. The scanner submits the `signature` and `challenge_id` to `validateNFCTicket`.
+4. The API verifies the signature against the stored `device_public_key` using `verifyRSASignature`.
+5. The challenge is immediately deleted after use to prevent replay attacks.
+
+## Numbered seating
+
+For events with `type_venue = NUMERADO`, seating is modeled through a four-level hierarchy:
+
+```
+EventPlaces (venue)
+  └── EventPlaceZone (e.g., "VIP", "Platea Alta")
+        └── EventPlaceRow (e.g., "A", "B", "H")
+              └── EventPlaceSeat (e.g., "A1", "Y15")
+```
+
+Each `EventPlaceSeat` has a permanent `status` field:
+
+| Value | Meaning |
+|-------|---------|
+| `ACTIVE` | Seat is usable |
+| `BLOCKED_MAINTENANCE` | Seat is out of service |
+
+Per-event seat availability is tracked in `EventSeatStatus`:
+
+| Value | Meaning |
+|-------|---------|
+| `AVAILABLE` | Seat can be selected |
+| `HELD` | Seat is reserved in a user's cart. Expires at `held_until`. |
+| `SOLD` | Seat has been purchased |
+| `BLOCKED` | Seat is reserved for production, press, or other non-sale purposes |

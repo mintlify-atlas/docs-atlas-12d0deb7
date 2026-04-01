@@ -1,0 +1,375 @@
+---
+title: "Invoices"
+description: "Create invoices and track purchase orders"
+---
+
+An invoice is created when a customer selects tickets for an event. It holds the line items, pricing, discount information, and payment status. Once the payment gateway (Wompi) confirms the payment, the invoice transitions to `PAID` and the system automatically issues the corresponding [Tickets](/api/tickets).
+
+## InvoiceStatus enum
+
+| Value | Description |
+|---|---|
+| `ISSUED` | Invoice created, awaiting payment |
+| `PROCESSING` | Payment is being processed by the gateway |
+| `PAID` | Payment confirmed; tickets have been issued |
+| `PENDING` | Pending gateway confirmation |
+| `REJECTED` | Payment was rejected by the gateway |
+| `CANCELED` | Invoice was canceled before payment |
+| `REFUNDED` | Payment was refunded |
+
+---
+
+## POST /api/invoices
+
+**Roles:** All authenticated roles
+
+Creates a new invoice with one or more line items. The caller must provide their document number on first purchase; it is saved to their profile for future purchases. If the event requires a document number and none is stored, `user_num_doc` is required in the request body.
+
+### Body
+
+<ParamField body="event_id" type="number" required>
+  ID of the event to purchase tickets for.
+</ParamField>
+
+<ParamField body="items" type="object[]" required>
+  Array of ticket line items. Must contain at least one entry.
+  <Expandable title="item fields">
+    <ParamField body="items[].stage_id" type="number" required>
+      ID of the pricing stage (e.g., Early Bird, General Admission).
+    </ParamField>
+    <ParamField body="items[].locality_id" type="number" required>
+      ID of the venue locality (e.g., Floor, VIP).
+    </ParamField>
+    <ParamField body="items[].qty_tickets" type="number" required>
+      Number of tickets to purchase for this stage/locality combination. Must be ≥ 1.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="discount_code" type="string">
+  Optional discount code to apply. Validated against the event's active discount rules.
+</ParamField>
+
+<ParamField body="promoter_code" type="string">
+  Optional promoter referral code. Applies only if the event has `allow_external_promoters = true`.
+</ParamField>
+
+<ParamField body="user_num_doc" type="string">
+  Document number of the purchaser. Required for first-time purchases if not already stored on the user profile.
+</ParamField>
+
+<ParamField body="user_type_doc" type="string">
+  Document type. One of `CC`, `CE`, `PA`, `TI`, `NIT`, `SSN`. Defaults to `CC`.
+</ParamField>
+
+<ParamField body="device_uuid" type="string">
+  UUID of the purchaser's device. Stored on issued tickets for device-binding validation.
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">Confirmation that the invoice was created.</ResponseField>
+<ResponseField name="invoice" type="object">
+  The created invoice record.
+  <Expandable title="invoice fields">
+    <ResponseField name="id" type="number">Invoice ID.</ResponseField>
+    <ResponseField name="user_id" type="number">Purchaser's user ID.</ResponseField>
+    <ResponseField name="num_invoice" type="string">Human-readable invoice number.</ResponseField>
+    <ResponseField name="event_id" type="number">Event ID.</ResponseField>
+    <ResponseField name="num_items" type="number">Total quantity of tickets across all line items.</ResponseField>
+    <ResponseField name="apply_discount" type="number">`1` if a discount was applied, `0` otherwise.</ResponseField>
+    <ResponseField name="discount_type" type="number">Discount type: `1` = percentage, `2` = fixed amount.</ResponseField>
+    <ResponseField name="discount_value" type="number">Discount value applied.</ResponseField>
+    <ResponseField name="total_ticket_regular" type="number">Total before discount (in currency units).</ResponseField>
+    <ResponseField name="total_ticket_dcto" type="number">Total after discount.</ResponseField>
+    <ResponseField name="total" type="number">Final amount to pay.</ResponseField>
+    <ResponseField name="paypac_commission_pct" type="number">PayPac commission percentage at time of purchase.</ResponseField>
+    <ResponseField name="paypac_commission_amount" type="number">PayPac commission amount in currency units.</ResponseField>
+    <ResponseField name="promoter_commission_amount" type="number">Promoter commission amount, if applicable.</ResponseField>
+    <ResponseField name="status" type="string">Invoice status (`ISSUED` on creation).</ResponseField>
+    <ResponseField name="createdAt" type="string">ISO 8601 creation timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="items" type="object[]">
+  Line items associated with the invoice.
+  <Expandable title="item fields">
+    <ResponseField name="id" type="number">Line item ID.</ResponseField>
+    <ResponseField name="invoice_id" type="number">Parent invoice ID.</ResponseField>
+    <ResponseField name="stage_id" type="number">Stage ID.</ResponseField>
+    <ResponseField name="stage_name" type="string">Stage name.</ResponseField>
+    <ResponseField name="locality_id" type="number">Locality ID.</ResponseField>
+    <ResponseField name="locality_name" type="string">Locality name.</ResponseField>
+    <ResponseField name="qty_tickets" type="number">Quantity of tickets.</ResponseField>
+    <ResponseField name="price_ticket" type="number">Unit price.</ResponseField>
+    <ResponseField name="total_ticket_regular" type="number">Line total before discount.</ResponseField>
+    <ResponseField name="total_ticket_paid" type="number">Line total after discount.</ResponseField>
+    <ResponseField name="status_item" type="number">`0` = pending, `1` = issued, `2` = canceled.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Event not found, stage/locality mismatch, invalid discount code, or missing document number |
+| `401` | Missing or invalid authentication token |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url "https://api.paypac.com.co/api/invoices" \
+  --header "Authorization: Bearer <token>" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "event_id": 42,
+    "items": [
+      { "stage_id": 5, "locality_id": 3, "qty_tickets": 2 }
+    ],
+    "discount_code": "EARLY20",
+    "user_num_doc": "1234567890",
+    "user_type_doc": "CC"
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## GET /api/invoices/my-invoices
+
+**Roles:** All authenticated roles
+
+Returns all invoices belonging to the authenticated user, each including their line items.
+
+### Response
+
+<ResponseField name="total" type="number">Number of invoices returned.</ResponseField>
+<ResponseField name="invoices" type="object[]">
+  Array of invoice objects, each with an `invoice` and `items` property.
+  <Expandable title="invoice wrapper fields">
+    <ResponseField name="invoice" type="object">Full invoice record (same fields as the `POST /api/invoices` response).</ResponseField>
+    <ResponseField name="items" type="object[]">Array of line items for this invoice.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `401` | Missing or invalid authentication token |
+| `500` | Internal server error |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url "https://api.paypac.com.co/api/invoices/my-invoices" \
+  --header "Authorization: Bearer <token>"
+```
+
+</CodeGroup>
+
+---
+
+## GET /api/invoices/:id
+
+**Roles:** All authenticated roles (ownership-checked server-side)
+
+Returns a single invoice with its line items. Access is granted to the invoice owner, to `PAYPAC`, and to the `ORGANIZER` of the event associated with the invoice.
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Invoice ID.
+</ParamField>
+
+### Response
+
+<ResponseField name="invoice" type="object">Full invoice record.</ResponseField>
+<ResponseField name="items" type="object[]">Array of invoice line items.</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `401` | Missing or invalid authentication token |
+| `403` | Caller does not own the invoice and is not `PAYPAC` or the event organizer |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url "https://api.paypac.com.co/api/invoices/99" \
+  --header "Authorization: Bearer <token>"
+```
+
+</CodeGroup>
+
+---
+
+## GET /api/events/:eventId/invoices
+
+**Roles:** `ORGANIZER`, `PAYPAC`
+
+Returns all invoices for a specific event. `ORGANIZER` access is limited to events they own.
+
+### Path parameters
+
+<ParamField path="eventId" type="number" required>
+  Event ID.
+</ParamField>
+
+### Response
+
+<ResponseField name="total" type="number">Total number of invoices for the event.</ResponseField>
+<ResponseField name="invoices" type="object[]">Array of invoice records for the event.</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `401` | Missing or invalid authentication token |
+| `403` | `ORGANIZER` does not own this event |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url "https://api.paypac.com.co/api/events/42/invoices" \
+  --header "Authorization: Bearer <token>"
+```
+
+</CodeGroup>
+
+---
+
+## GET /api/events/:eventId/invoices/stats
+
+**Roles:** `ORGANIZER`, `PAYPAC`
+
+Returns aggregated revenue and sales statistics for a specific event's invoices.
+
+### Path parameters
+
+<ParamField path="eventId" type="number" required>
+  Event ID.
+</ParamField>
+
+### Response
+
+The response shape is determined by the `InvoiceRepository.getEventInvoiceStats` aggregation and includes totals broken down by status and revenue figures.
+
+<ResponseField name="total_invoices" type="number">Total invoices for the event.</ResponseField>
+<ResponseField name="total_revenue" type="number">Sum of `total` across all `PAID` invoices.</ResponseField>
+<ResponseField name="by_status" type="object">Invoice counts keyed by `InvoiceStatus` value.</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `401` | Missing or invalid authentication token |
+| `403` | `ORGANIZER` does not own this event |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url "https://api.paypac.com.co/api/events/42/invoices/stats" \
+  --header "Authorization: Bearer <token>"
+```
+
+</CodeGroup>
+
+---
+
+## PATCH /api/invoices/:id/status
+
+<Warning>
+  This endpoint is called internally by the Wompi payment webhook. It does not currently require authentication (authentication is marked as a TODO in the source). Do not expose it directly to end users.
+</Warning>
+
+Updates an invoice's status, typically triggered after a payment gateway event. When status is set to `PAID`, the service automatically issues tickets for all line items.
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Invoice ID.
+</ParamField>
+
+### Body
+
+<ParamField body="status" type="string" required>
+  New invoice status. One of `ISSUED`, `PROCESSING`, `PAID`, `PENDING`, `REJECTED`, `CANCELED`, `REFUNDED`.
+</ParamField>
+
+<ParamField body="transaction_id" type="number" required>
+  ID of the payment transaction confirming this status change.
+</ParamField>
+
+<ParamField body="customer_phone" type="string" required>
+  Phone UUID of the purchasing customer's device. Used when creating tickets.
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">Confirmation that the invoice status was updated.</ResponseField>
+<ResponseField name="invoice" type="object">Updated invoice record.</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Invoice not found, invalid status, or ticket-creation failure |
+
+<CodeGroup>
+
+```bash cURL
+curl --request PATCH \
+  --url "https://api.paypac.com.co/api/invoices/99/status" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "status": "PAID",
+    "transaction_id": 777,
+    "customer_phone": "device-uuid-123"
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## PATCH /api/invoices/:id/cancel
+
+**Roles:** All authenticated roles (ownership-checked server-side)
+
+Cancels an invoice. Only the invoice owner or `PAYPAC` may cancel. Invoices with status `PAID` cannot be canceled — a refund must be requested instead.
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Invoice ID to cancel.
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">Confirmation of successful cancellation.</ResponseField>
+<ResponseField name="invoice" type="object">Updated invoice with `status = "CANCELED"`.</ResponseField>
+
+### Errors
+
+| Code | Reason |
+|---|---|
+| `400` | Invoice is already `PAID` or caller lacks permission |
+| `401` | Missing or invalid authentication token |
+
+<CodeGroup>
+
+```bash cURL
+curl --request PATCH \
+  --url "https://api.paypac.com.co/api/invoices/99/cancel" \
+  --header "Authorization: Bearer <token>"
+```
+
+</CodeGroup>

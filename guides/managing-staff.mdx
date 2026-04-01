@@ -1,0 +1,169 @@
+---
+title: "Managing staff"
+description: "Assign and manage staff members for your events"
+---
+
+## Overview
+
+Staff members are assigned to specific events and are responsible for validating tickets at the door. Only `ORGANIZER` (owner of the event) or `PAYPAC` can assign or remove staff.
+
+## Staff roles
+
+| Role | Description |
+|---|---|
+| `STAFF` | Door staff. Can check in, validate tickets at the entrance, and check out. |
+| `STAFF_PROMOTER` | Combined promoter/staff role. Has the same door access as `STAFF` and also earns promoter commissions on sales. |
+
+<Note>
+  A user must already have the `STAFF` or `STAFF_PROMOTER` role in PayPac before they can be assigned to an event. Use the invite flow (below) to onboard users who do not yet have an account.
+</Note>
+
+## Assigning staff to an event
+
+<Steps>
+  <Step title="Assign an existing user">
+    Use `POST /api/events/:eventId/staff` with the staff member's `user_id`.
+
+    <CodeGroup>
+    ```bash curl
+    curl -X POST https://api.paypac.com.co/api/events/42/staff \
+      -H "Authorization: Bearer <token>" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "user_id": 77,
+        "role_type": "STAFF",
+        "door_identifier": "Puerta Norte"
+      }'
+    ```
+    </CodeGroup>
+
+    The `door_identifier` field notes which entrance the staff member covers. It is optional but useful for larger venues.
+
+    An email notification (`NOTIFICATION_ASSIGNING_EVENT` template) is sent automatically to the assigned staff member with the event name, date, and address.
+  </Step>
+
+  <Step title="Invite a new user (pending invitation)">
+    If the staff member does not yet have a PayPac account, send an invitation with `POST /api/events/:eventId/staff?invite=true`.
+
+    <CodeGroup>
+    ```bash curl
+    curl -X POST "https://api.paypac.com.co/api/events/42/staff?invite=true" \
+      -H "Authorization: Bearer <token>" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "role_type": "STAFF",
+        "door_identifier": "Puerta Sur",
+        "email_or_phone": "nuevo.staff@example.com"
+      }'
+    ```
+    </CodeGroup>
+
+    The assignment is stored with `invitation_pending: true`. Once the invitee registers and accepts, the assignment is activated.
+
+    <Note>
+      If the email or phone already belongs to an existing account, the API returns an error and you should use the regular assignment flow instead.
+    </Note>
+  </Step>
+</Steps>
+
+## Viewing staff for an event
+
+<CodeGroup>
+```bash curl
+curl -X GET https://api.paypac.com.co/api/events/42/staff \
+  -H "Authorization: Bearer <token>"
+```
+</CodeGroup>
+
+Accessible by the event's `ORGANIZER`, any assigned `STAFF` or `STAFF_PROMOTER`, or `PAYPAC`.
+
+To get a summary of how many staff are assigned and how many have checked in:
+
+<CodeGroup>
+```bash curl — Staff stats
+curl -X GET https://api.paypac.com.co/api/events/42/staff/stats \
+  -H "Authorization: Bearer <token>"
+```
+</CodeGroup>
+
+## Removing staff
+
+<CodeGroup>
+```bash curl
+curl -X DELETE https://api.paypac.com.co/api/events/42/staff/77 \
+  -H "Authorization: Bearer <token>"
+```
+</CodeGroup>
+
+Only the event organizer or `PAYPAC` can remove a staff member.
+
+## Staff check-in at the event
+
+Before staff can validate tickets, they must check in. Check-in is only allowed within the window defined by `date_checkin_open` and `date_checkin_close` on the event.
+
+<CodeGroup>
+```bash curl — Check in
+curl -X POST https://api.paypac.com.co/api/events/42/staff/check-in \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "latitude": "4.6516",
+    "longitude": "-74.0579"
+  }'
+```
+
+```bash curl — Check out
+curl -X POST https://api.paypac.com.co/api/events/42/staff/check-out \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+</CodeGroup>
+
+`latitude` and `longitude` are optional. Geolocation validation is reserved for a future release.
+
+## My assigned events (staff perspective)
+
+Staff members can list all events they are assigned to:
+
+<CodeGroup>
+```bash curl — All assigned events
+curl -X GET https://api.paypac.com.co/api/staff/my-events \
+  -H "Authorization: Bearer <token>"
+```
+
+```bash curl — Next upcoming event
+curl -X GET https://api.paypac.com.co/api/staff/my-next-event \
+  -H "Authorization: Bearer <token>"
+```
+</CodeGroup>
+
+`GET /api/staff/my-next-event` returns the single upcoming assignment closest to its `date_checkin_open` time, along with the current check-in state.
+
+## Ticket validation by staff
+
+After checking in, staff can scan and validate tickets at the door with `POST /api/tickets/:id/validate`.
+
+<CodeGroup>
+```bash curl
+curl -X POST https://api.paypac.com.co/api/tickets/1001/validate \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+</CodeGroup>
+
+<Warning>
+  A staff member must have completed check-in (`checked_in: true`) before they can validate tickets. Attempts to validate without a check-in will be rejected.
+</Warning>
+
+Staff can also monitor overall check-in progress for an event:
+
+<CodeGroup>
+```bash curl — Check-in progress
+curl -X GET https://api.paypac.com.co/api/events/42/checkin-stats \
+  -H "Authorization: Bearer <token>"
+```
+</CodeGroup>
+
+The response includes `total_tickets`, `used_tickets`, and `pct` (percentage validated).

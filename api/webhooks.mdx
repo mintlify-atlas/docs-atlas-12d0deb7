@@ -1,0 +1,201 @@
+---
+title: "Webhooks"
+description: "Receive payment event notifications from Wompi."
+---
+
+<Warning>
+  This endpoint does **not** use Bearer token authentication. Security is enforced via SHA256 signature verification on every incoming request. Do not add an `Authorization` header when testing.
+</Warning>
+
+---
+
+## Overview
+
+PayPac integrates with [Wompi](https://wompi.com) as its payment gateway. When a transaction changes state (e.g. a payment is approved or declined), Wompi sends an HTTP POST request to the webhook endpoint with the event details and a cryptographic signature.
+
+The backend verifies the signature, validates the environment, and then processes the event — updating invoice status, generating tickets, and dispatching push and email notifications.
+
+---
+
+## **POST** /api/webhooks/wompi
+
+Receives and processes transaction status update events from Wompi.
+
+**Authentication:** None — verified via SHA256 signature (see [Security](#security) below).
+
+### Request body
+
+Wompi sends a JSON body with the following structure:
+
+<ParamField body="event" type="string" required>
+  Event type. Currently handled: `transaction.updated`. Any other event type is acknowledged but not processed.
+</ParamField>
+
+<ParamField body="timestamp" type="number" required>
+  Unix timestamp (seconds) at which Wompi generated the event. Used in signature computation.
+</ParamField>
+
+<ParamField body="environment" type="string" required>
+  Wompi environment. `"test"` for sandbox, `"production"` for live. Must match the server's `WOMPI_MODE` setting.
+</ParamField>
+
+<ParamField body="signature" type="object" required>
+  Signature block used for verification.
+
+  <Expandable title="signature properties">
+    <ParamField body="properties" type="string[]">
+      Ordered list of dot-notation paths into the event payload used to construct the checksum string (e.g. `["data.transaction.id", "data.transaction.status", "data.transaction.amount_in_cents"]`).
+    </ParamField>
+    <ParamField body="checksum" type="string">
+      HMAC-SHA256 hex digest. Computed by Wompi over the concatenation of the listed property values and the event timestamp, using the Wompi Events Secret key.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="data" type="object" required>
+  Event payload.
+
+  <Expandable title="data properties">
+    <ParamField body="transaction" type="object">
+      The transaction object for `transaction.updated` events.
+
+      <Expandable title="transaction properties">
+        <ParamField body="id" type="string">Wompi transaction ID.</ParamField>
+        <ParamField body="reference" type="string">Order reference — matches `num_invoice` in the PayPac database.</ParamField>
+        <ParamField body="status" type="string">New transaction status. One of: `APPROVED`, `DECLINED`, `VOIDED`, `PENDING`, `ERROR`.</ParamField>
+        <ParamField body="amount_in_cents" type="number">Transaction amount in the smallest currency unit (COP centavos).</ParamField>
+        <ParamField body="customer_email" type="string">Buyer's email address.</ParamField>
+        <ParamField body="payment_method_type" type="string">Payment method identifier (e.g. `CARD`, `PSE`, `NEQUI`).</ParamField>
+        <ParamField body="payment_method" type="object">Payment method details (brand, last four digits, installments, etc.).</ParamField>
+        <ParamField body="customer_data" type="object">Buyer identity data (name, document number, phone).</ParamField>
+        <ParamField body="finalized_at" type="string">ISO 8601 timestamp when the transaction reached its final state.</ParamField>
+        <ParamField body="created_at" type="string">ISO 8601 timestamp when the transaction was created.</ParamField>
+      </Expandable>
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+### Processing flow
+
+When a `transaction.updated` event is received, the backend performs the following steps in order:
+
+1. **Signature verification** — the SHA256 checksum is validated. Invalid signatures return `401` immediately (see [Security](#security)).
+2. **Environment check** — the `environment` field must match the server's configured `WOMPI_MODE` (`sandbox` → `"test"`, `production` → `"production"`). Mismatches return `400`.
+3. **Invoice lookup** — the invoice is located by matching `data.transaction.reference` against `Invoice.num_invoice`. If not found, processing stops silently.
+4. **Transaction upsert** — the transaction record is created or updated. Duplicate `APPROVED` events are detected and ignored.
+5. **Real-time notification** — a `transaction:updated` event is emitted to the buyer via Socket.IO.
+6. **Status-specific handling:**
+   - **`APPROVED`**: Invoice is marked `PAID`, tickets are generated and emitted via `tickets:created` Socket.IO event, promoter balance is recorded if a code was used, and email notifications (`INVOICE_STATUS`, `TICKET_PURCHASE`) and a push notification are dispatched.
+   - **`DECLINED`** / **`ERROR`**: Invoice is marked `REJECTED`, a `payment:declined` Socket.IO event is emitted, and an `INVOICE_STATUS` email is queued.
+   - **`VOIDED`**: Invoice is marked `CANCELED`, a `payment:voided` Socket.IO event is emitted, and an `INVOICE_STATUS` email is queued.
+   - **`PENDING`**: A `payment:pending` Socket.IO event is emitted. No email is sent; the next webhook delivery will carry the final status.
+
+### Response `200`
+
+The endpoint **always** returns HTTP 200, even on internal processing errors. This prevents Wompi from retrying deliveries for errors that are not recoverable through retry (e.g. an invoice that genuinely does not exist).
+
+<ResponseField name="received" type="boolean">
+  Always `true`.
+</ResponseField>
+
+<ResponseField name="processing_time_ms" type="number">
+  Server-side processing time in milliseconds.
+</ResponseField>
+
+<ResponseField name="error" type="string">
+  Present only when an internal error occurred during processing. The event was still acknowledged.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | The `environment` field does not match the server's configured Wompi mode. |
+| `401`  | SHA256 signature verification failed. The request was not sent by Wompi or was tampered with. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://api.paypac.com.co/api/webhooks/wompi \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "event": "transaction.updated",
+    "timestamp": 1711929600,
+    "environment": "production",
+    "signature": {
+      "properties": [
+        "data.transaction.id",
+        "data.transaction.status",
+        "data.transaction.amount_in_cents"
+      ],
+      "checksum": "a3f2c1d9e4b7..."
+    },
+    "data": {
+      "transaction": {
+        "id": "wompi-txn-abc123",
+        "reference": "INV-20240401-0042",
+        "status": "APPROVED",
+        "amount_in_cents": 15000000,
+        "customer_email": "buyer@example.com",
+        "payment_method_type": "CARD",
+        "payment_method": {
+          "extra": {
+            "brand": "VISA",
+            "last_four": "4242"
+          },
+          "installments": 1
+        },
+        "customer_data": {
+          "full_name": "María García",
+          "phone_number": "3001234567",
+          "legal_id": "123456789"
+        },
+        "finalized_at": "2024-04-01T12:00:01.000Z",
+        "created_at": "2024-04-01T11:59:45.000Z"
+      }
+    }
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## Security
+
+### Signature verification
+
+Every request from Wompi includes a `signature` object. Before processing any event, the backend verifies this signature using HMAC-SHA256:
+
+1. Extract the values of the properties listed in `signature.properties` from the event payload (in order).
+2. Concatenate those values with the event `timestamp` (as a string).
+3. Compute HMAC-SHA256 over the concatenated string using the **Wompi Events Secret** (configured via the `WOMPI_EVENTS_SECRET` environment variable).
+4. Compare the resulting hex digest against `signature.checksum`. The request is rejected with `401` if they do not match.
+
+<Warning>
+  Never expose your `WOMPI_EVENTS_SECRET` in client-side code or version control. Rotate the secret immediately if it is ever compromised.
+</Warning>
+
+### Environment validation
+
+The `environment` field in the payload must match the server's Wompi mode configuration:
+
+| `WOMPI_MODE` env var | Expected `environment` value |
+|----------------------|------------------------------|
+| `sandbox` | `"test"` |
+| `production` | `"production"` |
+
+Mismatched environments return `400` and are not processed. This prevents sandbox test transactions from accidentally updating production records.
+
+---
+
+## Retry behavior and idempotency
+
+Wompi retries failed webhook deliveries (non-200 responses) with exponential backoff. The PayPac webhook handler:
+
+- Always returns HTTP 200 to prevent unnecessary retries for non-recoverable errors.
+- Detects duplicate `APPROVED` events by checking if the transaction record already has `status = APPROVED`, and skips reprocessing silently.
+- Transaction records are upserted (create-or-update) rather than created blindly, making the handler safe to receive the same event multiple times.
+
+If you need to replay a specific webhook for testing or recovery, use the Wompi dashboard to re-trigger delivery, or contact Wompi support.

@@ -1,0 +1,174 @@
+---
+title: "Roles & Permissions"
+description: "Understanding the six user roles and what each can access"
+keywords: ["roles", "permissions", "RBAC", "authorization", "PAYPAC", "ORGANIZER", "STAFF", "PROMOTER", "CUSTOMER"]
+---
+
+Every request to the PayPac API is authenticated and authorized against a single role stored on the `User` record. Roles are enforced at the route level by the `authorizeRoles` middleware, which compares the authenticated user's role against the list of roles permitted for that endpoint.
+
+## The six roles
+
+| Role | Description |
+|------|-------------|
+| `PAYPAC` | Platform super-admin. Full access to every endpoint, including status transitions, administrative overrides, and all transaction data. |
+| `ORGANIZER` | Event organizer. Creates and manages their own events, assigns staff, and views invoices and ticket stats for events they own. |
+| `STAFF` | Event staff assigned to a specific event. Can validate tickets at the door after completing event check-in. |
+| `STAFF_PROMOTER` | A staff member who also has promoter capabilities. Shares validation rights with `STAFF` and ticket transfer rights with `PROMOTER`. |
+| `PROMOTER` | External ticket promoter. Can browse events, manage their own tickets, and earn commission tracked via `PromoterCode`. |
+| `CUSTOMER` | End-user buyer. Can purchase tickets, view their wallet, transfer tickets, and register a device public key. |
+
+Roles are stored as the `ROLES` enum on the `User.role` field and default to `CUSTOMER` at registration.
+
+## Role assignment
+
+The role is set directly on the `User` model:
+
+```prisma
+model User {
+  role  ROLES  @default(CUSTOMER)
+  // ...
+}
+
+enum ROLES {
+  PAYPAC
+  ORGANIZER
+  STAFF
+  STAFF_PROMOTER
+  PROMOTER
+  CUSTOMER
+}
+```
+
+A user has exactly one role at any time. Role changes require a direct update to the `User` record, typically performed by a `PAYPAC` administrator.
+
+## API permissions by role
+
+<Tabs>
+  <Tab title="PAYPAC">
+    | Endpoint | Action |
+    |----------|--------|
+    | `POST /api/events` | Create events |
+    | `PUT /api/events/:id` | Update any event |
+    | `PATCH /api/events/:id/status` | Change event status (only role allowed) |
+    | `DELETE /api/events/:id` | Delete any event |
+    | `GET /api/events` | List all events regardless of status |
+    | `GET /api/tickets/admin` | View all tickets |
+    | `PATCH /api/tickets/admin/:id/status` | Update any ticket status |
+    | `POST /api/tickets/admin/:id/transfer` | Admin-force transfer a ticket |
+    | `POST /api/tickets/:id/validate` | Validate tickets at entry |
+    | `GET /api/transactions` | View all transactions |
+    | `GET /api/transactions/by-reference/:ref` | Look up transaction by reference |
+    | `GET /api/transactions/by-invoice/:id` | Look up transaction by invoice |
+    | `GET /api/transactions/by-status/:status` | Filter transactions by status |
+    | `GET /api/events/:eventId/invoices` | View event invoices |
+    | `GET /api/events/:eventId/invoices/stats` | View event invoice stats |
+  </Tab>
+  <Tab title="ORGANIZER">
+    | Endpoint | Action |
+    |----------|--------|
+    | `POST /api/events` | Create events (auto-assigned as organizer) |
+    | `PUT /api/events/:id` | Update own events (blocked after `APPROVED` status) |
+    | `DELETE /api/events/:id` | Delete own events |
+    | `GET /api/events/my-events` | List own events |
+    | `GET /api/events/organizer/stats` | View own event statistics |
+    | `GET /api/tickets/admin` | View tickets for own events |
+    | `GET /api/tickets/event/:eventId/stats` | View ticket stats for own events |
+    | `POST /api/tickets/:id/validate` | Validate tickets at entry |
+    | `GET /api/events/:eventId/invoices` | View invoices for own events |
+    | `GET /api/events/:eventId/invoices/stats` | View invoice stats for own events |
+  </Tab>
+  <Tab title="STAFF">
+    | Endpoint | Action |
+    |----------|--------|
+    | `GET /api/events` | View `ACTIVE` and `APPROVED` events |
+    | `GET /api/events/:id` | View specific event |
+    | `GET /api/tickets/my-tickets` | View own ticket wallet |
+    | `GET /api/tickets/upcoming` | View upcoming tickets |
+    | `GET /api/tickets/event/:eventId/stats` | View ticket stats for assigned event |
+    | `POST /api/tickets/:id/validate` | Validate tickets (must be assigned and checked in) |
+    | `POST /api/tickets/:id/transfer` | Transfer own tickets |
+    | `GET /api/invoices/my-invoices` | View own invoices |
+  </Tab>
+  <Tab title="STAFF_PROMOTER">
+    Inherits the same access as `STAFF`. Can also validate tickets and transfer tickets like a standard staff member.
+
+    | Endpoint | Action |
+    |----------|--------|
+    | `POST /api/tickets/:id/validate` | Validate tickets (must be assigned and checked in) |
+    | `POST /api/tickets/:id/transfer` | Transfer own tickets |
+    | All `STAFF` endpoints | Same as STAFF |
+  </Tab>
+  <Tab title="PROMOTER">
+    | Endpoint | Action |
+    |----------|--------|
+    | `GET /api/events` | View `ACTIVE` and `APPROVED` public events |
+    | `GET /api/events/:id` | View specific event |
+    | `GET /api/tickets/my-tickets` | View own ticket wallet |
+    | `GET /api/tickets/upcoming` | View upcoming tickets |
+    | `POST /api/tickets/:id/transfer` | Transfer own tickets |
+    | `GET /api/invoices/my-invoices` | View own invoices |
+    | `POST /api/transactions/signature` | Generate Wompi payment signature |
+    | `POST /api/transactions/process` | Process a transaction |
+  </Tab>
+  <Tab title="CUSTOMER">
+    | Endpoint | Action |
+    |----------|--------|
+    | `GET /api/events` | View `ACTIVE` and `APPROVED` public events |
+    | `GET /api/events/:id` | View specific event |
+    | `GET /api/tickets/my-tickets` | View own ticket wallet |
+    | `GET /api/tickets/upcoming` | View upcoming tickets |
+    | `GET /api/tickets/:id` | View own ticket |
+    | `POST /api/tickets/:id/transfer` | Transfer, sell, or gift own tickets |
+    | `PATCH /api/tickets/:id/public-key` | Register device RSA public key |
+    | `GET /api/tickets/:id/totp-secret` | Retrieve TOTP secret for QR |
+    | `DELETE /api/tickets/:id` | Cancel own ticket |
+    | `POST /api/invoices` | Create an invoice (start a purchase) |
+    | `GET /api/invoices/my-invoices` | View own invoices |
+    | `PATCH /api/invoices/:id/cancel` | Cancel an unpaid invoice |
+    | `POST /api/transactions/signature` | Generate Wompi payment signature |
+    | `POST /api/transactions/process` | Process a transaction |
+  </Tab>
+</Tabs>
+
+## Section permissions
+
+Beyond route-level authorization, the `RoleSectionPermission` model provides fine-grained UI section access control. Each role can have a permission record per `Section` with five independent flags:
+
+```prisma
+model RoleSectionPermission {
+  role        ROLES
+  section_id  Int
+  can_view    Boolean @default(false)
+  can_create  Boolean @default(false)
+  can_edit    Boolean @default(false)
+  can_delete  Boolean @default(false)
+  can_export  Boolean @default(false)
+
+  @@id([role, section_id])
+}
+```
+
+| Flag | Controls |
+|------|----------|
+| `can_view` | Whether the role can see the section |
+| `can_create` | Whether the role can create records in this section |
+| `can_edit` | Whether the role can modify existing records |
+| `can_delete` | Whether the role can delete records |
+| `can_export` | Whether the role can export data from this section |
+
+Sections are hierarchical — a `Section` can have a `parent_id` pointing to another `Section`, allowing nested menu structures with inherited permission checks.
+
+## DocType enum
+
+When users provide identity documents (for ticket purchases and invoices), the `type_doc` field uses the `DocType` enum:
+
+| Value | Document type |
+|-------|---------------|
+| `CC` | Cédula de Ciudadanía — Colombian national ID |
+| `CE` | Cédula de Extranjería — Colombian foreign resident ID |
+| `PA` | Pasaporte — passport |
+| `TI` | Tarjeta de Identidad — Colombian minor's ID |
+| `NIT` | Número de Identificación Tributaria — business tax ID |
+| `SSN` | Social Security Number — US national ID |
+
+The `DocType` appears on both the `User` model (`type_doc`) and on the `Invoice` model (`user_type_doc`), where it is snapshotted at the time of purchase.

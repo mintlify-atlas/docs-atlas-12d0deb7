@@ -1,0 +1,198 @@
+---
+title: "Promoter program"
+description: "Set up promoter reward rules and track promoter performance"
+---
+
+## Overview
+
+Promoters drive ticket sales by sharing their personal codes with buyers. When a buyer applies a promoter code at checkout, the sale is attributed to that promoter. Each event can have reward rules that define how much a promoter earns per attributed sale.
+
+## Promoter codes
+
+Every user with the `PROMOTER` role can create a personal code. Codes are unique across the platform and are entered by buyers during invoice creation.
+
+<Steps>
+  <Step title="Create a promoter code">
+    <CodeGroup>
+    ```bash curl
+    curl -X POST https://api.paypac.com.co/api/promoter-codes \
+      -H "Authorization: Bearer <token>" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "code": "JUAN2026",
+        "description": "Código de Juan Pérez"
+      }'
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Share the code with buyers">
+    Buyers enter the code in the `discount_code` field when creating an invoice. The system validates the code and attributes the sale to the promoter.
+
+    To verify a code is valid before checkout:
+
+    <CodeGroup>
+    ```bash curl
+    curl -X GET https://api.paypac.com.co/api/promoter-codes/validate/JUAN2026 \
+      -H "Authorization: Bearer <token>"
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Check my code and stats">
+    <CodeGroup>
+    ```bash curl — My code
+    curl -X GET https://api.paypac.com.co/api/promoter-codes/my-code \
+      -H "Authorization: Bearer <token>"
+    ```
+
+    ```bash curl — My sales stats
+    curl -X GET https://api.paypac.com.co/api/promoter-codes/my-stats \
+      -H "Authorization: Bearer <token>"
+    ```
+    </CodeGroup>
+  </Step>
+</Steps>
+
+## Reward rules
+
+Reward rules are configured per event and define how much a promoter earns when a sale is attributed to them. Rules are created by the event's `ORGANIZER` or `PAYPAC`.
+
+### Create a reward rule
+
+<CodeGroup>
+```bash curl — Percentage reward
+curl -X POST https://api.paypac.com.co/api/events/42/reward-rules \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "reward_type": "PERCENTAGE",
+    "reward_percentage": 8,
+    "locality_id": null
+  }'
+```
+
+```bash curl — Fixed amount reward scoped to a locality
+curl -X POST https://api.paypac.com.co/api/events/42/reward-rules \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "reward_type": "FIXED_AMOUNT",
+    "reward_amount": 5000,
+    "locality_id": 101
+  }'
+```
+</CodeGroup>
+
+<Tip>
+  Scope a reward rule to a specific `locality_id` to offer higher commissions on premium sections like VIP. A rule without `locality_id` applies to all localities in the event.
+</Tip>
+
+### Reward types
+
+| `reward_type` | Description |
+|---|---|
+| `NONE` | No reward — useful to explicitly disable commissions for an event or locality |
+| `PERCENTAGE` | Promoter earns `reward_percentage` % of the ticket sale amount |
+| `FIXED_AMOUNT` | Promoter earns a flat `reward_amount` per ticket sold |
+| `GUEST_LIST` | Promoter receives complimentary tickets instead of cash |
+| `TICKET_REWARD` | Promoter earns a ticket credit after reaching a sales threshold |
+| `CASH_REWARD` | Promoter earns a lump cash payment after reaching a sales threshold |
+| `CONSUMPTION_REWARD` | Promoter earns a consumption/bar credit redeemable at the venue |
+
+### List reward rules for an event
+
+<CodeGroup>
+```bash curl
+curl -X GET https://api.paypac.com.co/api/events/42/reward-rules \
+  -H "Authorization: Bearer <token>"
+```
+</CodeGroup>
+
+### Calculate a reward (preview)
+
+Use this endpoint to preview how much a promoter would earn for a given sale without creating any records.
+
+<CodeGroup>
+```bash curl
+curl -X POST https://api.paypac.com.co/api/reward-rules/calculate \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "event_id": 42,
+    "quantity": 2,
+    "total_amount": 240000,
+    "locality_id": 101
+  }'
+```
+</CodeGroup>
+
+## Promoter balances
+
+As sales are attributed, the system accumulates each promoter's earned rewards in an `EventBalancePromoter` record per event.
+
+### View balances for an event
+
+<CodeGroup>
+```bash curl — All promoter balances for an event
+curl -X GET https://api.paypac.com.co/api/events/42/balances \
+  -H "Authorization: Bearer <token>"
+```
+
+```bash curl — Balance stats summary
+curl -X GET https://api.paypac.com.co/api/events/42/balances/stats \
+  -H "Authorization: Bearer <token>"
+```
+</CodeGroup>
+
+Requires `ORGANIZER` or `PAYPAC` role.
+
+### Promoter's own balance
+
+<CodeGroup>
+```bash curl — My balance across all events
+curl -X GET https://api.paypac.com.co/api/promoters/my-balance \
+  -H "Authorization: Bearer <token>"
+```
+
+```bash curl — My balance stats
+curl -X GET https://api.paypac.com.co/api/promoters/my-balance/stats \
+  -H "Authorization: Bearer <token>"
+```
+</CodeGroup>
+
+Available to `PROMOTER` and `STAFF_PROMOTER` roles.
+
+## Liquidation
+
+When an event transitions to `FINALIZED`, the platform triggers automatic liquidation, which computes the final reward amounts for all promoters based on confirmed sales.
+
+After liquidation, pending balances appear in `GET /api/balances/pending` (requires `PAYPAC`).
+
+### Marking balances as paid
+
+<CodeGroup>
+```bash curl — Mark single balance as paid
+curl -X PATCH https://api.paypac.com.co/api/balances/88/mark-paid \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "payment_date": "2026-09-20T10:00:00.000Z",
+    "payment_method": "Transferencia bancaria",
+    "payment_reference": "TXN-1234567"
+  }'
+```
+
+```bash curl — Bulk mark as paid
+curl -X PATCH https://api.paypac.com.co/api/balances/bulk-pay \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "balance_ids": [88, 89, 90],
+    "payment_date": "2026-09-20T10:00:00.000Z",
+    "payment_method": "Transferencia bancaria"
+  }'
+```
+</CodeGroup>
+
+Both endpoints require `ORGANIZER` or `PAYPAC` role.

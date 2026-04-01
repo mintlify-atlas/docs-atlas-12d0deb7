@@ -1,0 +1,173 @@
+---
+title: "Payments"
+description: "Payment processing, invoices, and transaction reconciliation"
+keywords: ["payments", "Wompi", "invoice", "transaction", "webhook", "signature", "refund", "discount", "promoter commission"]
+---
+
+PayPac processes payments through [Wompi](https://wompi.com), a Colombian payment gateway. The flow starts with invoice creation, moves through gateway authorization, and concludes when Wompi delivers a signed webhook confirming the outcome.
+
+## Payment flow overview
+
+<Steps>
+  <Step title="Create an invoice">
+    The buyer calls `POST /api/invoices` with the `event_id`, a list of `items` (stage and locality selections), and an optional `discount_code` or `promoter_code`. The API validates ticket availability, applies any discounts, calculates commissions, and returns an `Invoice` in `ISSUED` status along with the line items.
+  </Step>
+  <Step title="Generate a Wompi signature">
+    Before rendering the payment UI, the client calls `POST /api/transactions/signature` to obtain a server-generated integrity signature. This signature is required by Wompi to authenticate the transaction parameters on the frontend.
+  </Step>
+  <Step title="Process the transaction">
+    The client calls `POST /api/transactions/process` with the payment method token, installments, and cart contents. The backend:
+    1. Creates the `Invoice` and `InvoiceTickets` records inside a database transaction.
+    2. Locks the user account (`status = 99`) to prevent double-spending.
+    3. Creates a Wompi payment source from the card token.
+    4. Generates the Wompi integrity signature.
+    5. Submits the transaction to Wompi.
+    6. Saves a `Transactions` record with status `PENDING`.
+    7. Unlocks the user account.
+  </Step>
+  <Step title="Wompi confirms via webhook">
+    Wompi calls `POST /api/webhooks/wompi` with the transaction result. The webhook handler verifies the SHA256 signature, then updates the invoice status and issues tickets if the payment was accepted.
+  </Step>
+  <Step title="Tickets issued">
+    When the invoice transitions to `PAID`, `InvoiceService.updateInvoiceStatus` calls `TicketService.createTicketsFromInvoice`, which generates one `Ticket` record per seat purchased, each with its own `reference_ticket`, `booking_ticket`, `token_ticket`, and `totp_secret`.
+  </Step>
+</Steps>
+
+## Wompi integration
+
+Wompi is PayPac's payment gateway. The integration uses:
+
+- **Private certificate** — used server-side to authorize payment sources and create transactions via the Wompi REST API.
+- **Acceptance token** — fetched from Wompi's merchants endpoint at transaction time to confirm the buyer accepts terms.
+- **Payment source** — a tokenized card representation created from the buyer's card token before each transaction.
+- **Integrity signature** — a server-generated hash that Wompi uses to verify transaction parameters have not been tampered with on the client.
+
+To generate a signature:
+
+```http
+POST /api/transactions/signature
+Authorization: Bearer <token>
+
+{
+  "reference": "INV-00001",
+  "amount_in_cents": 150000,
+  "currency": "COP",
+  "expiration_time": "2026-04-01T23:59:00Z"
+}
+```
+
+The API returns the computed SHA256 integrity hash. Pass this value to the Wompi payment widget.
+
+<Warning>
+  The signature endpoint requires authentication. Never compute the Wompi integrity signature on the client — doing so would expose your private key.
+</Warning>
+
+## Invoice lifecycle
+
+Invoices track the state of a purchase from intent through fulfillment or cancellation.
+
+| Status | Description |
+|--------|-------------|
+| `ISSUED` | Invoice created. Waiting for payment to be initiated. |
+| `PROCESSING` | Payment submitted to Wompi. Awaiting gateway response. |
+| `PENDING` | Transaction created at Wompi but final confirmation not yet received. |
+| `PAID` | Payment confirmed. Tickets have been issued. |
+| `REJECTED` | Payment declined by Wompi or the issuing bank. |
+| `CANCELED` | Invoice canceled by the buyer or `PAYPAC` before payment was completed. A paid invoice cannot be canceled — a refund must be requested instead. |
+| `REFUNDED` | Payment was refunded. See the `refunded_amount` and `refunded_at` fields. |
+
+Key invoice fields:
+
+| Field | Description |
+|-------|-------------|
+| `num_invoice` | Human-readable invoice number (e.g., `INV-00001`) |
+| `total_ticket_regular` | Total price without any discount |
+| `total_ticket_dcto` | Total after discount is applied |
+| `total` | Final amount charged |
+| `paypac_commission_pct` | Commission percentage snapshotted from `Event.commission_percentage` at purchase time |
+| `paypac_commission_amount` | Computed PayPac commission in the event's currency |
+| `promoter_commission_amount` | Promoter commission computed from the applicable reward rule |
+| `refunded_amount` | Amount refunded (partial or full) |
+| `refunded_at` | Timestamp of the refund |
+
+## Transaction model
+
+The `Transactions` model stores the complete gateway response for each payment attempt:
+
+| Field | Description |
+|-------|-------------|
+| `invoice_id` | The `num_invoice` reference passed to Wompi |
+| `reference` | Same as `num_invoice` — Wompi's external reference |
+| `amount_in_cents` | Transaction amount in Colombian cents |
+| `currency` | Currency code (always `COP`) |
+| `payment_method_type` | Gateway payment method type (e.g., `CARD`) |
+| `payment_method` | JSON object with installments and method details |
+| `status` | Current gateway status |
+| `billing_data` | Serialized customer billing information |
+| `payment_source_id` | The Wompi payment source ID created for this transaction |
+| `meta` | JSON object containing `customer_ID_phone`, `codeDCTO`, and `wompi_transaction_id` |
+
+## Webhook reconciliation
+
+Wompi notifies PayPac of payment outcomes by calling:
+
+```http
+POST /api/webhooks/wompi
+```
+
+<Warning>
+  This endpoint has no Bearer token authentication. Security is enforced exclusively through SHA256 signature verification inside the webhook handler. Never remove or bypass this verification — doing so would allow any caller to mark invoices as paid.
+</Warning>
+
+The handler:
+
+1. Reads the raw request body and the `X-Event-Checksum` header (or equivalent Wompi signature header).
+2. Recomputes the expected SHA256 hash using the shared Wompi webhook secret.
+3. Rejects the request with `401` if the signatures do not match.
+4. Updates the invoice status based on the transaction outcome.
+5. If the status maps to `PAID`, triggers ticket issuance.
+
+## Discount system
+
+Discounts are configured per event using the `EventDcto` model:
+
+| Field | Description |
+|-------|-------------|
+| `code` | Optional unique discount code buyers enter at checkout |
+| `type_dcto` | `1` = percentage discount, `2` = fixed amount discount |
+| `value_dcto` | Discount value (percent or absolute amount) |
+| `max_uses` | Maximum number of times the code can be redeemed (`null` = unlimited) |
+| `uses_count` | Running count of redemptions |
+| `min_qty_tickets` | Minimum ticket quantity required to apply the discount |
+| `max_qty_tickets` | Maximum ticket quantity the discount applies to |
+| `is_active` | Whether the discount is currently accepting redemptions |
+
+When a buyer provides a `discount_code` on invoice creation, the service validates the code's `is_active` flag, checks that `uses_count < max_uses`, verifies ticket quantity constraints, and applies the discount before recording `uses_count + 1`.
+
+## Promoter commission tracking
+
+When an event has `allow_external_promoters = true` and a buyer provides a `promoter_code` at checkout, the service:
+
+1. Looks up the `PromoterCode` and the associated promoter's reward rule (`EventRewardRules`).
+2. Calculates the commission using the rule type (`PERCENTAGE`, `FIXED_AMOUNT`, etc.).
+3. Stores `promoter_commission_amount` on the invoice and links `promoter_code_id`.
+
+Commission balances are tracked in `EventBalancePromoters` and settled through the `EventLiquidation` process after the event is finalized.
+
+## Refunds
+
+Refund data is stored directly on the `Invoice` record:
+
+```prisma
+model Invoice {
+  refunded_amount  Int?      // partial or full refund amount
+  refunded_at      DateTime? // timestamp of the refund
+  // ...
+}
+```
+
+A refunded invoice transitions to status `REFUNDED`. Canceling a `PAID` invoice is not permitted — the buyer must request a refund through `PAYPAC` support. The `cancelInvoice` method explicitly blocks cancellation of paid invoices:
+
+```
+"No se puede cancelar una factura pagada. Solicita un reembolso."
+```

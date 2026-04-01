@@ -1,0 +1,1290 @@
+---
+title: "Promoters"
+description: "Manage promoter codes, event reward rules, and promoter balance statements."
+---
+
+<Info>
+  All endpoints require a Firebase ID token passed as `Authorization: Bearer <token>`.
+</Info>
+
+---
+
+## Promoter codes
+
+Promoter codes are unique alphanumeric strings assigned to each promoter. When a customer applies a code at checkout, the promoter earns a commission based on the applicable reward rule for that event.
+
+---
+
+## **GET** /api/promoter-codes/my-code
+
+Returns the promoter code belonging to the authenticated promoter.
+
+**Required role:** `PROMOTER`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="id" type="number">
+  Promoter code record ID.
+</ResponseField>
+
+<ResponseField name="promoter_id" type="number">
+  ID of the promoter who owns this code.
+</ResponseField>
+
+<ResponseField name="code" type="string">
+  The unique promoter code string (e.g. `JUAN2024`).
+</ResponseField>
+
+<ResponseField name="is_active" type="boolean">
+  Whether the code is currently active and can be applied at checkout.
+</ResponseField>
+
+<ResponseField name="uses_count" type="number">
+  Total number of times the code has been used across all purchases.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string">
+  ISO 8601 creation timestamp.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PROMOTER` role. |
+| `404`  | The promoter has no code yet. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/promoter-codes/my-code \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/promoter-codes/my-stats
+
+Returns sales statistics for the authenticated promoter — total tickets sold and total commissions earned.
+
+**Required role:** `PROMOTER`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="total_uses" type="number">
+  Total number of times the promoter's code has been applied.
+</ResponseField>
+
+<ResponseField name="total_tickets_sold" type="number">
+  Total tickets sold through the promoter's code.
+</ResponseField>
+
+<ResponseField name="total_earned" type="number">
+  Total commission earned (sum of all approved balance records), in the event currency.
+</ResponseField>
+
+<ResponseField name="pending_payment" type="number">
+  Commission earned but not yet paid out.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PROMOTER` role. |
+| `404`  | No stats found for this promoter. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/promoter-codes/my-stats \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/promoter-codes/validate/:code
+
+Validate a promoter code at checkout. Returns the code details and the promoter's identity so the checkout flow can calculate the applicable commission.
+
+**Required role:** Any authenticated user
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="code" type="string" required>
+  The promoter code string to validate.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="id" type="number">
+  Promoter code record ID.
+</ResponseField>
+
+<ResponseField name="code" type="string">
+  The validated code.
+</ResponseField>
+
+<ResponseField name="is_active" type="boolean">
+  `true` if the code is active. An inactive code will still be found but should not be applied.
+</ResponseField>
+
+<ResponseField name="promoter_id" type="number">
+  ID of the promoter who owns the code.
+</ResponseField>
+
+<ResponseField name="uses_count" type="number">
+  Current use count.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `404`  | Code not found or does not exist. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/promoter-codes/validate/JUAN2024 \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **POST** /api/promoter-codes
+
+Create a promoter code. A promoter can create their own code with an optional custom string; `PAYPAC` can create codes on behalf of any promoter.
+
+**Required role:** `PROMOTER` or `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Request body
+
+<ParamField body="custom_code" type="string">
+  Desired code string. If omitted, the system generates one automatically. Must be unique across all codes.
+</ParamField>
+
+### Response `201`
+
+<ResponseField name="message" type="string">
+  `"Código creado exitosamente"`
+</ResponseField>
+
+<ResponseField name="promoter_code" type="object">
+  The created promoter code record.
+
+  <Expandable title="promoter_code properties">
+    <ResponseField name="id" type="number">Record ID.</ResponseField>
+    <ResponseField name="promoter_id" type="number">Owning promoter's user ID.</ResponseField>
+    <ResponseField name="code" type="string">The assigned code string.</ResponseField>
+    <ResponseField name="is_active" type="boolean">Always `true` on creation.</ResponseField>
+    <ResponseField name="uses_count" type="number">Always `0` on creation.</ResponseField>
+    <ResponseField name="createdAt" type="string">ISO 8601 timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Validation error. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PROMOTER` or `PAYPAC` role. |
+| `409`  | Promoter already has a code, or the requested code string is already in use. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://api.paypac.com.co/api/promoter-codes \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{ "custom_code": "CARLOS2024" }'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/promoter-codes
+
+List all promoter codes in the system. Optionally filter by active status.
+
+**Required role:** `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Query parameters
+
+<ParamField query="is_active" type="boolean">
+  Filter by active status. `true` returns only active codes; `false` returns only inactive codes. Omit to return all.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="total" type="number">
+  Count of codes returned.
+</ResponseField>
+
+<ResponseField name="codes" type="object[]">
+  Array of promoter code objects.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PAYPAC` role. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url 'https://api.paypac.com.co/api/promoter-codes?is_active=true' \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **PATCH** /api/promoter-codes/:id/toggle
+
+Toggle a promoter code's active status. If it was active it becomes inactive, and vice versa.
+
+**Required role:** `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Promoter code record ID.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="message" type="string">
+  `"Código activado"` or `"Código desactivado"` depending on the resulting state.
+</ResponseField>
+
+<ResponseField name="code" type="object">
+  The updated promoter code with the new `is_active` value.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PAYPAC` role. |
+| `404`  | Promoter code not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request PATCH \
+  --url https://api.paypac.com.co/api/promoter-codes/7/toggle \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **DELETE** /api/promoter-codes/:id
+
+Delete a promoter code.
+
+**Required role:** `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Promoter code record ID.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="message" type="string">
+  `"Código eliminado exitosamente"`
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PAYPAC` role. |
+| `404`  | Promoter code not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request DELETE \
+  --url https://api.paypac.com.co/api/promoter-codes/7 \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## Event reward rules
+
+Reward rules define how much commission a promoter earns when their code is applied to a ticket purchase for a specific event. Each event can have one or more rules, optionally scoped to a locality.
+
+### `EventRewardPromoters` enum
+
+| Value | Description |
+|-------|-------------|
+| `NONE` | No reward. Used as a default placeholder. |
+| `PERCENTAGE` | Commission is a percentage of the ticket sale amount. Configured via `reward_percentage`. |
+| `FIXED_AMOUNT` | A flat monetary amount per qualifying sale. Configured via `reward_amount`. |
+| `GUEST_LIST` | Reward takes the form of complimentary guest-list entries. |
+| `TICKET_REWARD` | Reward takes the form of free tickets. |
+| `CASH_REWARD` | Cash payout reward. |
+| `CONSUMPTION_REWARD` | Reward in the form of event consumption credit. |
+
+---
+
+## **POST** /api/events/:eventId/reward-rules
+
+Create a new reward rule for an event.
+
+**Required role:** `ORGANIZER` (must own the event) or `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="eventId" type="number" required>
+  Event ID.
+</ParamField>
+
+### Request body
+
+<ParamField body="reward_type" type="string" required>
+  Reward type. One of: `NONE`, `PERCENTAGE`, `FIXED_AMOUNT`, `GUEST_LIST`, `TICKET_REWARD`, `CASH_REWARD`, `CONSUMPTION_REWARD`.
+</ParamField>
+
+<ParamField body="reward_percentage" type="number">
+  Percentage value (0–100). Required when `reward_type` is `PERCENTAGE`.
+</ParamField>
+
+<ParamField body="reward_amount" type="number">
+  Fixed monetary amount in the event currency (integer, in minor units). Required when `reward_type` is `FIXED_AMOUNT` or `CASH_REWARD`.
+</ParamField>
+
+<ParamField body="min_qty_tickets" type="number">
+  Minimum number of tickets in the order for this rule to apply.
+</ParamField>
+
+<ParamField body="min_amount_tickets" type="number">
+  Minimum total order value (in minor units) for this rule to apply.
+</ParamField>
+
+<ParamField body="locality_id" type="number">
+  Scope the rule to a specific event locality. If omitted, the rule applies to all localities.
+</ParamField>
+
+### Response `201`
+
+<ResponseField name="message" type="string">
+  `"Regla de recompensa creada exitosamente"`
+</ResponseField>
+
+<ResponseField name="rule" type="object">
+  The created reward rule.
+
+  <Expandable title="rule properties">
+    <ResponseField name="id" type="number">Rule ID.</ResponseField>
+    <ResponseField name="event_id" type="number">Associated event ID.</ResponseField>
+    <ResponseField name="reward_type" type="string">Reward type enum value.</ResponseField>
+    <ResponseField name="reward_percentage" type="number">Percentage value, or `null`.</ResponseField>
+    <ResponseField name="reward_amount" type="number">Fixed amount, or `null`.</ResponseField>
+    <ResponseField name="min_qty_tickets" type="number">Minimum ticket quantity threshold, or `null`.</ResponseField>
+    <ResponseField name="min_amount_tickets" type="number">Minimum order amount threshold, or `null`.</ResponseField>
+    <ResponseField name="locality_id" type="number">Scoped locality ID, or `null`.</ResponseField>
+    <ResponseField name="createdAt" type="string">ISO 8601 timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Validation error or business rule violation. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | `ORGANIZER` does not own the event. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://api.paypac.com.co/api/events/42/reward-rules \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "reward_type": "PERCENTAGE",
+    "reward_percentage": 10,
+    "min_qty_tickets": 1
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/events/:eventId/reward-rules
+
+List all reward rules for a specific event.
+
+**Required role:** Any authenticated user
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="eventId" type="number" required>
+  Event ID.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="total" type="number">
+  Number of rules returned.
+</ResponseField>
+
+<ResponseField name="rules" type="object[]">
+  Array of reward rule objects. Same shape as the create response.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `404`  | Event not found or has no rules. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/events/42/reward-rules \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/reward-rules/:id
+
+Retrieve a specific reward rule by its ID.
+
+**Required role:** Any authenticated user
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Reward rule ID.
+</ParamField>
+
+### Response `200`
+
+The reward rule object.
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `404`  | Rule not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/reward-rules/3 \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **PUT** /api/reward-rules/:id
+
+Update a reward rule.
+
+**Required role:** `ORGANIZER` (must own the event this rule belongs to) or `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Reward rule ID.
+</ParamField>
+
+### Request body
+
+All fields are optional. Only provided fields are updated.
+
+<ParamField body="reward_type" type="string">
+  Reward type. One of the `EventRewardPromoters` enum values.
+</ParamField>
+
+<ParamField body="reward_percentage" type="number">
+  Percentage value (0–100).
+</ParamField>
+
+<ParamField body="reward_amount" type="number">
+  Fixed monetary amount.
+</ParamField>
+
+<ParamField body="min_qty_tickets" type="number">
+  Minimum ticket quantity threshold.
+</ParamField>
+
+<ParamField body="min_amount_tickets" type="number">
+  Minimum order amount threshold.
+</ParamField>
+
+<ParamField body="locality_id" type="number">
+  Locality scope.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="message" type="string">
+  `"Regla de recompensa actualizada exitosamente"`
+</ResponseField>
+
+<ResponseField name="rule" type="object">
+  The updated reward rule.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Validation error. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | `ORGANIZER` does not own the event this rule belongs to. |
+| `404`  | Rule not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request PUT \
+  --url https://api.paypac.com.co/api/reward-rules/3 \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "reward_percentage": 15
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## **DELETE** /api/reward-rules/:id
+
+Delete a reward rule.
+
+**Required role:** `ORGANIZER` (must own the event this rule belongs to) or `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Reward rule ID.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="message" type="string">
+  `"Regla de recompensa eliminada exitosamente"`
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Deletion not allowed (e.g. rule has associated balance records). |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | `ORGANIZER` does not own the event. |
+| `404`  | Rule not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request DELETE \
+  --url https://api.paypac.com.co/api/reward-rules/3 \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **POST** /api/reward-rules/calculate
+
+Calculate what commission would apply for a given sale, without creating any records. Useful for checkout previews and testing reward rule configurations.
+
+**Required role:** `PAYPAC`, `ORGANIZER`, `STAFF`, `STAFF_PROMOTER`, or `PROMOTER`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Request body
+
+<ParamField body="event_id" type="number" required>
+  Event ID to look up applicable rules for.
+</ParamField>
+
+<ParamField body="quantity" type="number" required>
+  Number of tickets in the hypothetical order.
+</ParamField>
+
+<ParamField body="total_amount" type="number" required>
+  Total order amount (in minor currency units, e.g. cents).
+</ParamField>
+
+<ParamField body="locality_id" type="number">
+  Locality ID, to also check locality-scoped rules.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="hasReward" type="boolean">
+  `true` if a matching rule was found, `false` if no applicable rules exist.
+</ResponseField>
+
+<ResponseField name="reward_type" type="string">
+  The matched rule's reward type. Present only when `hasReward` is `true`.
+</ResponseField>
+
+<ResponseField name="reward_amount" type="number">
+  Calculated reward amount in minor units. Present only when `hasReward` is `true`.
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Human-readable explanation. Present when `hasReward` is `false`.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Validation error. |
+| `401`  | Missing or invalid Bearer token. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://api.paypac.com.co/api/reward-rules/calculate \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "event_id": 42,
+    "quantity": 3,
+    "total_amount": 150000,
+    "locality_id": 5
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## Promoter balances
+
+Each time a purchase with a promoter code is approved, a balance record is created for that promoter. These records accumulate until they are marked as paid.
+
+---
+
+## **GET** /api/events/:eventId/balances
+
+List all promoter balance records for a specific event.
+
+**Required role:** `ORGANIZER` (must own the event) or `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="eventId" type="number" required>
+  Event ID.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="total" type="number">
+  Number of balance records returned.
+</ResponseField>
+
+<ResponseField name="balances" type="object[]">
+  Array of balance records.
+
+  <Expandable title="balance properties">
+    <ResponseField name="id" type="number">Balance record ID.</ResponseField>
+    <ResponseField name="event_id" type="number">Associated event ID.</ResponseField>
+    <ResponseField name="promoter_id" type="number">Promoter's user ID.</ResponseField>
+    <ResponseField name="reward_rule_id" type="number">The reward rule that generated this balance, or `null`.</ResponseField>
+    <ResponseField name="reward_amount" type="number">Commission amount earned (in event currency).</ResponseField>
+    <ResponseField name="reward_description" type="string">Human-readable description of the earning (e.g. `"Comisión por 2 ticket(s) — Invoice INV-001"`).</ResponseField>
+    <ResponseField name="tickets_sold" type="number">Number of tickets sold in the triggering purchase.</ResponseField>
+    <ResponseField name="invoice_id" type="number">The invoice that generated this balance, or `null`.</ResponseField>
+    <ResponseField name="status" type="number">`0` = pending, `1` = paid, `2` = cancelled.</ResponseField>
+    <ResponseField name="expiration_date" type="string">ISO 8601 payment cutoff date, or `null`.</ResponseField>
+    <ResponseField name="createdAt" type="string">ISO 8601 creation timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | `ORGANIZER` does not own the event. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/events/42/balances \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/events/:eventId/balances/stats
+
+Return aggregate statistics for promoter balances on a specific event.
+
+**Required role:** `ORGANIZER` (must own the event) or `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="eventId" type="number" required>
+  Event ID.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="total_earned" type="number">
+  Total commission earned across all promoters for this event.
+</ResponseField>
+
+<ResponseField name="total_paid" type="number">
+  Total commission already paid out.
+</ResponseField>
+
+<ResponseField name="total_pending" type="number">
+  Total commission still pending payment.
+</ResponseField>
+
+<ResponseField name="promoter_count" type="number">
+  Number of distinct promoters with balance records for this event.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | `ORGANIZER` does not own the event. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/events/42/balances/stats \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **POST** /api/events/:eventId/balances/assign-cutoff
+
+Manually assign a payment cutoff date to all pending balance records for an event. This is normally triggered automatically when the event is finalized.
+
+**Required role:** `ORGANIZER` (must own the event) or `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="eventId" type="number" required>
+  Event ID.
+</ParamField>
+
+### Request body
+
+<ParamField body="days_after_event" type="number">
+  Number of days after the event date to set as the cutoff. Defaults to `15` if omitted.
+</ParamField>
+
+### Response `200`
+
+Confirmation of how many balance records were updated with the new cutoff date.
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Validation error. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | `ORGANIZER` does not own the event. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://api.paypac.com.co/api/events/42/balances/assign-cutoff \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{ "days_after_event": 30 }'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/balances/pending
+
+List all pending balance records across all events.
+
+**Required role:** `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="total" type="number">
+  Count of pending balance records.
+</ResponseField>
+
+<ResponseField name="balances" type="object[]">
+  Array of pending balance records. Same shape as the event balances list.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PAYPAC` role. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/balances/pending \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/balances/promoter/:promoterId
+
+Retrieve the full balance statement for a specific promoter.
+
+**Required role:** `PAYPAC`, `ORGANIZER`, the promoter themselves (`PROMOTER`), or `STAFF_PROMOTER`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="promoterId" type="number" required>
+  User ID of the promoter.
+</ParamField>
+
+### Response `200`
+
+Array of all balance records for the promoter, across all events, with totals.
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user is not authorized to view this promoter's statement. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/balances/promoter/88 \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/promoters/my-balance
+
+Returns the balance statement for the authenticated promoter.
+
+**Required role:** `PROMOTER` or `STAFF_PROMOTER`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Response `200`
+
+The authenticated promoter's balance statement. Same shape as the promoter balance response above.
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PROMOTER` or `STAFF_PROMOTER` role. |
+| `500`  | Internal server error. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/promoters/my-balance \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/promoters/my-balance/stats
+
+Returns aggregate earning statistics for the authenticated promoter.
+
+**Required role:** `PROMOTER` or `STAFF_PROMOTER`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="total_earned" type="number">
+  Total commission earned to date.
+</ResponseField>
+
+<ResponseField name="total_paid" type="number">
+  Total commission paid out.
+</ResponseField>
+
+<ResponseField name="total_pending" type="number">
+  Commission earned but not yet paid.
+</ResponseField>
+
+<ResponseField name="total_tickets_sold" type="number">
+  Total tickets attributed to the promoter's code.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `500`  | Internal server error. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/promoters/my-balance/stats \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **PATCH** /api/balances/:id/mark-paid
+
+Mark a single promoter balance record as paid.
+
+**Required role:** `ORGANIZER` (must own the event) or `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Balance record ID.
+</ParamField>
+
+### Request body
+
+<ParamField body="payment_method" type="string">
+  Description of the payment method used (e.g. `"bank_transfer"`, `"cash"`).
+</ParamField>
+
+<ParamField body="payment_reference" type="string">
+  External reference or transaction ID for the payment.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="message" type="string">
+  `"Balance marcado como pagado exitosamente"`
+</ResponseField>
+
+<ResponseField name="balance" type="object">
+  The updated balance record with `status: 1`.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Balance is already paid or in a non-payable state. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | `ORGANIZER` does not own the event this balance belongs to. |
+| `404`  | Balance record not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request PATCH \
+  --url https://api.paypac.com.co/api/balances/15/mark-paid \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "payment_method": "bank_transfer",
+    "payment_reference": "TRF-20240401-001"
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## **PATCH** /api/balances/bulk-pay
+
+Mark multiple promoter balance records as paid in a single request.
+
+**Required role:** `ORGANIZER` (must own the events) or `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Request body
+
+<ParamField body="balance_ids" type="number[]" required>
+  Array of balance record IDs to mark as paid.
+</ParamField>
+
+<ParamField body="payment_date" type="string">
+  ISO 8601 date/time of the payment. Defaults to now.
+</ParamField>
+
+<ParamField body="payment_method" type="string">
+  Payment method description.
+</ParamField>
+
+<ParamField body="payment_reference" type="string">
+  External payment reference or transaction ID.
+</ParamField>
+
+### Response `200`
+
+Summary of how many records were updated and any that could not be processed.
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Validation error or no valid balance IDs provided. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | `ORGANIZER` does not own some of the requested balances. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request PATCH \
+  --url https://api.paypac.com.co/api/balances/bulk-pay \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "balance_ids": [15, 16, 17],
+    "payment_method": "bank_transfer",
+    "payment_reference": "TRF-20240401-BATCH"
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## **POST** /api/balances/:id/refund
+
+Create a refund balance record (negative amount) linked to an existing balance. Used when a ticket purchase is reversed after the promoter commission has already been recorded.
+
+**Required role:** `ORGANIZER` (must own the event) or `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  ID of the original balance record to reverse.
+</ParamField>
+
+### Response `201`
+
+<ResponseField name="message" type="string">
+  `"Balance de reembolso creado exitosamente"`
+</ResponseField>
+
+<ResponseField name="balance" type="object">
+  The newly created refund balance record with a negative `reward_amount`.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Original balance already reversed or not in a refundable state. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | `ORGANIZER` does not own the event this balance belongs to. |
+| `404`  | Original balance record not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://api.paypac.com.co/api/balances/15/refund \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>

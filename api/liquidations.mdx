@@ -1,0 +1,419 @@
+---
+title: "Liquidations"
+description: "Event financial liquidation and payout management."
+---
+
+<Info>
+  Liquidations represent the final financial settlement for an event. `PAYPAC` creates and manages all liquidations; `ORGANIZER` can view their own. All endpoints require a Firebase ID token passed as `Authorization: Bearer <token>`.
+</Info>
+
+---
+
+## Liquidation model
+
+Each `EventLiquidation` record captures the full financial breakdown for a single event payout.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `number` | Auto-incremented record ID. |
+| `num_liquidation` | `string` | Unique human-readable identifier in the format `LIQ-XXXX`. |
+| `company_id` | `number` | The organizer company receiving the payout. |
+| `event_id` | `number` | The event this liquidation covers. |
+| `gross_amount` | `number` | Total gross revenue collected for the event. |
+| `paypac_commission` | `number` | PayPac's commission deducted from gross revenue. |
+| `promoter_commission` | `number` | Total promoter commissions deducted. Defaults to `0`. |
+| `refunds` | `number` | Total refunds processed. Defaults to `0`. |
+| `net_amount` | `number` | Amount paid to the organizer: `gross_amount - paypac_commission - promoter_commission - refunds`. |
+| `status` | `EventLiquidationStatus` | Current payout status. See enum below. |
+| `liquidation_date` | `string` | ISO 8601 date the liquidation was generated. |
+| `paid_at` | `string` | ISO 8601 timestamp of when the payout was made, or `null`. |
+| `createdAt` | `string` | ISO 8601 record creation timestamp. |
+
+### `EventLiquidationStatus` enum
+
+| Value | Description |
+|-------|-------------|
+| `PENDING` | Liquidation has been created but the payout has not yet been made. |
+| `PAID` | Payout has been transferred to the organizer. `paid_at` is set. |
+| `OVERDUE` | The scheduled payout date has passed without payment. |
+
+---
+
+## **GET** /api/liquidations/my-balance
+
+Returns a balance summary for the authenticated organizer: total gross revenue, commissions, refunds, and net payable across all their liquidations. Optionally scoped to a date range.
+
+**Required role:** `ORGANIZER`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Query parameters
+
+<ParamField query="from" type="string">
+  Start of date range (ISO 8601). Filters by `liquidation_date`.
+</ParamField>
+
+<ParamField query="to" type="string">
+  End of date range (ISO 8601). Filters by `liquidation_date`.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="total_gross" type="number">
+  Sum of `gross_amount` across matching liquidations.
+</ResponseField>
+
+<ResponseField name="total_paypac_commission" type="number">
+  Sum of `paypac_commission` across matching liquidations.
+</ResponseField>
+
+<ResponseField name="total_promoter_commission" type="number">
+  Sum of `promoter_commission` across matching liquidations.
+</ResponseField>
+
+<ResponseField name="total_refunds" type="number">
+  Sum of `refunds` across matching liquidations.
+</ResponseField>
+
+<ResponseField name="total_net" type="number">
+  Sum of `net_amount` across matching liquidations.
+</ResponseField>
+
+<ResponseField name="total_paid" type="number">
+  Sum of `net_amount` for liquidations with `status = PAID`.
+</ResponseField>
+
+<ResponseField name="total_pending" type="number">
+  Sum of `net_amount` for liquidations with `status = PENDING`.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `ORGANIZER` role. |
+| `500`  | Internal server error. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url 'https://api.paypac.com.co/api/liquidations/my-balance?from=2024-01-01&to=2024-12-31' \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/liquidations
+
+List liquidations. `PAYPAC` sees all liquidations with optional filters. `ORGANIZER` sees only liquidations for their own company.
+
+**Required role:** `PAYPAC` or `ORGANIZER`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Query parameters
+
+<ParamField query="status" type="string">
+  Filter by status. One of: `PENDING`, `PAID`, `OVERDUE`.
+</ParamField>
+
+<ParamField query="event_id" type="number">
+  Filter by event ID.
+</ParamField>
+
+<ParamField query="from" type="string">
+  Filter by `liquidation_date` start (ISO 8601).
+</ParamField>
+
+<ParamField query="to" type="string">
+  Filter by `liquidation_date` end (ISO 8601).
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="total" type="number">
+  Count of liquidations returned.
+</ResponseField>
+
+<ResponseField name="liquidations" type="object[]">
+  Array of liquidation objects.
+
+  <Expandable title="liquidation properties">
+    <ResponseField name="id" type="number">Liquidation ID.</ResponseField>
+    <ResponseField name="num_liquidation" type="string">Unique identifier (e.g. `LIQ-0042`).</ResponseField>
+    <ResponseField name="company_id" type="number">Organizer company ID.</ResponseField>
+    <ResponseField name="event_id" type="number">Associated event ID.</ResponseField>
+    <ResponseField name="gross_amount" type="number">Total gross revenue.</ResponseField>
+    <ResponseField name="paypac_commission" type="number">PayPac commission amount.</ResponseField>
+    <ResponseField name="promoter_commission" type="number">Promoter commission total.</ResponseField>
+    <ResponseField name="refunds" type="number">Total refunded amount.</ResponseField>
+    <ResponseField name="net_amount" type="number">Net payout to organizer.</ResponseField>
+    <ResponseField name="status" type="string">`PENDING`, `PAID`, or `OVERDUE`.</ResponseField>
+    <ResponseField name="liquidation_date" type="string">ISO 8601 liquidation date.</ResponseField>
+    <ResponseField name="paid_at" type="string">ISO 8601 payment date, or `null`.</ResponseField>
+    <ResponseField name="createdAt" type="string">ISO 8601 creation timestamp.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PAYPAC` or `ORGANIZER` role. |
+| `500`  | Internal server error. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url 'https://api.paypac.com.co/api/liquidations?status=PENDING&event_id=42' \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **POST** /api/liquidations
+
+Create a new liquidation record for an event.
+
+**Required role:** `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Request body
+
+<ParamField body="company_id" type="number" required>
+  ID of the organizer company to receive the payout.
+</ParamField>
+
+<ParamField body="event_id" type="number" required>
+  ID of the event being liquidated.
+</ParamField>
+
+<ParamField body="gross_amount" type="number" required>
+  Total gross revenue collected for the event.
+</ParamField>
+
+<ParamField body="paypac_commission" type="number" required>
+  PayPac's commission amount to deduct.
+</ParamField>
+
+<ParamField body="promoter_commission" type="number">
+  Total promoter commissions to deduct. Defaults to `0`.
+</ParamField>
+
+<ParamField body="refunds" type="number">
+  Total refunds to deduct. Defaults to `0`.
+</ParamField>
+
+<ParamField body="net_amount" type="number" required>
+  Net payout amount (`gross - paypac_commission - promoter_commission - refunds`).
+</ParamField>
+
+<ParamField body="liquidation_date" type="string" required>
+  ISO 8601 date for this liquidation.
+</ParamField>
+
+### Response `201`
+
+<ResponseField name="message" type="string">
+  `"Liquidación creada exitosamente"`
+</ResponseField>
+
+<ResponseField name="liquidation" type="object">
+  The newly created liquidation record. `num_liquidation` is auto-generated in the format `LIQ-XXXX`.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Validation error. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PAYPAC` role. |
+| `404`  | Referenced company or event not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://api.paypac.com.co/api/liquidations \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "company_id": 5,
+    "event_id": 42,
+    "gross_amount": 5000000,
+    "paypac_commission": 250000,
+    "promoter_commission": 100000,
+    "refunds": 50000,
+    "net_amount": 4600000,
+    "liquidation_date": "2024-04-01T00:00:00.000Z"
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## **GET** /api/liquidations/:id
+
+Retrieve a single liquidation by ID. `ORGANIZER` can only access liquidations belonging to their own company.
+
+**Required role:** `PAYPAC` or `ORGANIZER`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Liquidation record ID.
+</ParamField>
+
+### Response `200`
+
+The liquidation object. Same shape as the list response.
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | `ORGANIZER` attempted to access a liquidation that does not belong to their company. |
+| `404`  | Liquidation not found. |
+| `500`  | Internal server error. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request GET \
+  --url https://api.paypac.com.co/api/liquidations/9 \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
+
+---
+
+## **PATCH** /api/liquidations/:id/status
+
+Update the status of a liquidation (e.g. mark as `PAID` once the transfer is confirmed).
+
+**Required role:** `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Liquidation record ID.
+</ParamField>
+
+### Request body
+
+<ParamField body="status" type="string" required>
+  New status. One of: `PENDING`, `PAID`, `OVERDUE`.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="message" type="string">
+  `"Estado actualizado exitosamente"`
+</ResponseField>
+
+<ResponseField name="liquidation" type="object">
+  The updated liquidation record. When transitioning to `PAID`, `paid_at` is automatically set to the current timestamp.
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Invalid status value. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PAYPAC` role. |
+| `404`  | Liquidation not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request PATCH \
+  --url https://api.paypac.com.co/api/liquidations/9/status \
+  --header 'Authorization: Bearer <firebase-id-token>' \
+  --header 'Content-Type: application/json' \
+  --data '{ "status": "PAID" }'
+```
+
+</CodeGroup>
+
+---
+
+## **DELETE** /api/liquidations/:id
+
+Delete a liquidation record. Only available for liquidations that have not yet been paid.
+
+**Required role:** `PAYPAC`
+
+### Request headers
+
+<ParamField header="Authorization" type="string" required>
+  Firebase ID token: `Bearer <token>`
+</ParamField>
+
+### Path parameters
+
+<ParamField path="id" type="number" required>
+  Liquidation record ID.
+</ParamField>
+
+### Response `200`
+
+<ResponseField name="message" type="string">
+  `"Liquidación eliminada exitosamente"`
+</ResponseField>
+
+### Error responses
+
+| Status | Description |
+|--------|-------------|
+| `400`  | Liquidation has already been paid and cannot be deleted. |
+| `401`  | Missing or invalid Bearer token. |
+| `403`  | Authenticated user does not have `PAYPAC` role. |
+| `404`  | Liquidation not found. |
+
+<CodeGroup>
+
+```bash cURL
+curl --request DELETE \
+  --url https://api.paypac.com.co/api/liquidations/9 \
+  --header 'Authorization: Bearer <firebase-id-token>'
+```
+
+</CodeGroup>
